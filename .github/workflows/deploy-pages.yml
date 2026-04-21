@@ -16,8 +16,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -26,27 +30,11 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Verify static build output exists
-        run: |
-          if [ ! -d site ]; then
-            echo "::error::GitHub Pages only serves static files. This repo still uses a Flask backend, so you need a static build output in ./site before Pages deployment can work."
-            echo "::error::Refactor the upload flow to run fully client-side, then publish the generated static site to ./site."
-            exit 1
-          fi
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

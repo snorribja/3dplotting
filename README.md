@@ -2,12 +2,14 @@
 
 Upload a CSV and explore it as an interactive 3D dashboard.
 
-This project currently includes:
+This project is now a static site designed for GitHub Pages.
 
-- `app.py`: a Flask app with drag-and-drop CSV upload
-- `templates/index.html`: the upload UI
-- `csv_3d_dashboard.py`: the dashboard generator used by both the web app and CLI
-- `static/favicon.png`: the favicon shared with `snorribjarkason.com`
+## Project structure
+
+- `site/index.html`: the main upload page
+- `site/assets/app.js`: browser-side CSV parsing and dashboard generation
+- `site/favicon.png`: the favicon shared with `snorribjarkason.com`
+- `csv_3d_dashboard.py`: the original Python CLI generator for standalone HTML export
 
 ## Features
 
@@ -15,57 +17,47 @@ This project currently includes:
 - Generic CSV support, not tied to a specific domain
 - Interactive 3D scatter plot with selectable axes, color, size, and hover fields
 - Modern dark shell UI with a white chart surface
-- Standalone HTML dashboard generation from the command line
+- Static deployment on GitHub Pages
+- Standalone Python HTML generation from the command line
 
-## Run locally
+## Local preview
 
-1. Install dependencies:
+Because this is now a static site, you can preview the `site/` directory with any static file server.
 
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-If your Python environment is externally managed, use a virtualenv instead:
+Examples:
 
 ```bash
-python3 -m venv .venv
-./.venv/bin/pip install -r requirements.txt
+python3 -m http.server 8000 --directory site
 ```
 
-2. Start the app:
-
-```bash
-./.venv/bin/python app.py
-```
-
-Or, if you installed globally:
-
-```bash
-python3 app.py
-```
-
-3. Open:
+Then open:
 
 ```text
-http://127.0.0.1:5000
+http://127.0.0.1:8000
 ```
 
-4. Drop in a CSV file and the dashboard will appear on the right.
+## Python CLI usage
 
-## CLI usage
-
-You can still generate a standalone HTML dashboard directly from a CSV:
+The original Python exporter still works:
 
 ```bash
 python3 csv_3d_dashboard.py /path/to/data.csv
 ```
 
-That writes an HTML file next to the CSV by default.
+That writes a standalone HTML dashboard next to the CSV by default.
+
+## Python dependencies
+
+The static site does not need Python packages.
+
+`requirements.txt` only exists for the optional CLI exporter:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
 
 ## GitHub Pages
 
 This repo includes a Pages workflow at `.github/workflows/deploy-pages.yml`.
 
-Important: GitHub Pages only hosts static files. The current app uses Flask for upload and dashboard generation, so it cannot be deployed to GitHub Pages as-is.
-
-The workflow is prepared for a future static build in `./site` and will fail until that static output exists.
+It deploys the static site from `./site`.
