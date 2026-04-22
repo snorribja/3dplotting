@@ -13,23 +13,44 @@ const meta = document.getElementById("meta");
 const error = document.getElementById("error");
 const viewerContext = document.getElementById("viewer-context") || document.getElementById("viewer-title");
 const clearButton = document.getElementById("clear-button");
-const filterRules = document.getElementById("filter-rules");
-const filterEmpty = document.getElementById("filter-empty");
-const filterImpact = document.getElementById("filter-impact");
-const addFilterRuleButton = document.getElementById("add-filter-rule-button");
-const clearFilterRulesButton = document.getElementById("clear-filter-rules-button");
-const applyFilterRulesButton = document.getElementById("apply-filter-rules-button");
+const prepImpact = document.getElementById("prep-impact");
+const prepSummaryGrid = document.getElementById("prep-summary-grid");
+const prepSummaryEmpty = document.getElementById("prep-summary-empty");
 const emptyState = document.getElementById("empty-state");
 const loadingState = document.getElementById("loading-state");
 const loadingTitle = document.getElementById("loading-title");
 const dashboardTab = document.getElementById("dashboard-tab");
+const transformationTab = document.getElementById("transformation-tab");
 const statisticsTab = document.getElementById("statistics-tab");
 const distributionTab = document.getElementById("distribution-tab");
 const correlationTab = document.getElementById("correlation-tab");
 const dashboardPanel = document.getElementById("dashboard-panel");
+const transformationPanel = document.getElementById("transformation-panel");
 const statisticsPanel = document.getElementById("statistics-panel");
 const distributionPanel = document.getElementById("distribution-panel");
 const correlationPanel = document.getElementById("correlation-panel");
+const transformSummarySubtitle = document.getElementById("transform-summary-subtitle");
+const transformImpactGrid = document.getElementById("transform-impact-grid");
+const transformApplyNote = document.getElementById("transform-apply-note");
+const transformResetButton = document.getElementById("transform-reset-button");
+const transformApplyButton = document.getElementById("transform-apply-button");
+const transformScaleMode = document.getElementById("transform-scale-mode");
+const transformScaleColumns = document.getElementById("transform-scale-columns");
+const transformLogHandling = document.getElementById("transform-log-handling");
+const transformLogColumns = document.getElementById("transform-log-columns");
+const transformEncodeColumns = document.getElementById("transform-encode-columns");
+const keepRules = document.getElementById("keep-rules");
+const keepEmpty = document.getElementById("keep-empty");
+const excludeRules = document.getElementById("exclude-rules");
+const excludeEmpty = document.getElementById("exclude-empty");
+const addKeepRuleButton = document.getElementById("add-keep-rule-button");
+const clearKeepRulesButton = document.getElementById("clear-keep-rules-button");
+const addExcludeRuleButton = document.getElementById("add-exclude-rule-button");
+const clearExcludeRulesButton = document.getElementById("clear-exclude-rules-button");
+const transformPreviewGrid = document.getElementById("transform-preview-grid");
+const transformPreviewSubtitle = document.getElementById("transform-preview-subtitle");
+const transformPreviewNote = document.getElementById("transform-preview-note");
+const transformPreviewTable = document.getElementById("transform-preview-table");
 const statsNumericSelector = document.getElementById("stats-numeric-selector");
 const statsCategoricalSelector = document.getElementById("stats-categorical-selector");
 const statsNumericSearch = document.getElementById("stats-numeric-search");
@@ -88,8 +109,8 @@ const emptyStateTitle = document.querySelector(".empty-state-title");
 const emptyStateCopy = document.querySelector(".empty-state-copy");
 let sourcePayload = null;
 let currentPayload = null;
-let draftFilterRules = [];
-let appliedFilterRules = [];
+let draftTransformConfig = null;
+let appliedTransformConfig = null;
 let selectedStatsColumns = [];
 let selectedCategoricalStatsColumns = [];
 let statsNumericSearchValue = "";
@@ -106,6 +127,11 @@ let selectedMatrixColumns = [];
 let focusedMatrixPair = null;
 let currentMatrixPairLookup = new Map();
 let nextFilterRuleId = 1;
+const SCALING_OPTIONS = [
+  { value: "none", label: "No scaling" },
+  { value: "standardize", label: "Standardize (z-score)" },
+  { value: "normalize", label: "Normalize (min-max)" },
+];
 const FILTER_OPERATORS = {
   numeric: [
     { value: "eq", label: "is equal to" },
@@ -208,8 +234,8 @@ async function loadSelectedCsv() {
     const payload = buildPayload(rows, title);
     sourcePayload = payload;
     currentPayload = payload;
-    draftFilterRules = [];
-    appliedFilterRules = [];
+    draftTransformConfig = defaultTransformConfig();
+    appliedTransformConfig = defaultTransformConfig();
     selectedStatsColumns = payload.numeric_columns.slice(0, Math.min(4, payload.numeric_columns.length));
     selectedCategoricalStatsColumns = categoricalColumnsForPayload(payload).slice(0, Math.min(6, categoricalColumnsForPayload(payload).length));
     statsNumericSearchValue = "";
@@ -226,7 +252,7 @@ async function loadSelectedCsv() {
     selectedMatrixColumns = payload.numeric_columns.slice(0, Math.min(8, payload.numeric_columns.length));
     focusedMatrixPair = null;
     correlationMode = "pair";
-    renderFilterBuilder();
+    renderTransformationView();
     refreshActivePayload();
     emptyState.classList.add("hidden");
     if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
@@ -236,9 +262,9 @@ async function loadSelectedCsv() {
   } catch (err) {
     sourcePayload = null;
     currentPayload = null;
-    draftFilterRules = [];
-    appliedFilterRules = [];
-    renderFilterBuilder();
+    draftTransformConfig = null;
+    appliedTransformConfig = null;
+    renderTransformationView();
     setViewerContext("No dashboard loaded yet");
     emptyState.classList.remove("hidden");
     if (emptyStateKicker) emptyStateKicker.textContent = "Upload Error";
@@ -270,8 +296,40 @@ function clearMeta() {
   meta.style.display = "none";
 }
 
+function cloneRecord(row) {
+  return { ...row };
+}
+
 function cloneFilterRule(rule) {
   return { ...rule };
+}
+
+function defaultTransformConfig() {
+  return {
+    scaling: { mode: "none", columns: [] },
+    log: { columns: [], handling: "missing" },
+    encoding: { columns: [] },
+    keepRules: [],
+    excludeRules: [],
+  };
+}
+
+function cloneTransformConfig(config = defaultTransformConfig()) {
+  return {
+    scaling: {
+      mode: config.scaling?.mode || "none",
+      columns: [...(config.scaling?.columns || [])],
+    },
+    log: {
+      columns: [...(config.log?.columns || [])],
+      handling: config.log?.handling === "exclude" ? "exclude" : "missing",
+    },
+    encoding: {
+      columns: [...(config.encoding?.columns || [])],
+    },
+    keepRules: (config.keepRules || []).map(cloneFilterRule),
+    excludeRules: (config.excludeRules || []).map(cloneFilterRule),
+  };
 }
 
 function columnTypeForPayload(payload, column) {
@@ -420,7 +478,7 @@ function rowMatchesFilterRule(row, rule, payload) {
   }
 }
 
-function filterPreviewForRules(payload, rules) {
+function filterPreviewForRules(payload, rules, mode = "exclude") {
   if (!payload) {
     return { includedRecords: [], excludedCount: 0, includedCount: 0, invalidRuleCount: 0, validRules: [] };
   }
@@ -436,7 +494,11 @@ function filterPreviewForRules(payload, rules) {
     };
   }
 
-  const includedRecords = payload.records.filter((row) => !validRules.every((rule) => rowMatchesFilterRule(row, rule, payload)));
+  const keepMatches = mode === "keep";
+  const includedRecords = payload.records.filter((row) => {
+    const matchesAllRules = validRules.every((rule) => rowMatchesFilterRule(row, rule, payload));
+    return keepMatches ? matchesAllRules : !matchesAllRules;
+  });
   return {
     includedRecords,
     excludedCount: payload.records.length - includedRecords.length,
@@ -446,15 +508,238 @@ function filterPreviewForRules(payload, rules) {
   };
 }
 
-function derivePayloadFromSource(payload, rules) {
-  if (!payload) return null;
-  const preview = filterPreviewForRules(payload, rules);
+function createTransformRule(group) {
+  return createFilterRule(sourcePayload || currentPayload || null);
+}
+
+function setTransformRule(group, ruleId, updates) {
+  if (!draftTransformConfig) return;
+  draftTransformConfig[group] = draftTransformConfig[group].map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule));
+  renderTransformationView();
+}
+
+function removeTransformRule(group, ruleId) {
+  if (!draftTransformConfig) return;
+  draftTransformConfig[group] = draftTransformConfig[group].filter((rule) => rule.id !== ruleId);
+  renderTransformationView();
+}
+
+function validRuleCount(payload, rules) {
+  return rules.filter((rule) => validateFilterRule(rule, payload)).length;
+}
+
+function toggleTransformColumn(section, column) {
+  if (!draftTransformConfig) return;
+  const current = new Set(draftTransformConfig[section].columns);
+  if (current.has(column)) {
+    current.delete(column);
+  } else {
+    current.add(column);
+  }
+  draftTransformConfig[section].columns = [...current];
+  renderTransformationView();
+}
+
+function scalingSummaryText(config = appliedTransformConfig, payload = currentPayload || sourcePayload) {
+  if (!config || !payload) return "No dataset loaded";
+  const mode = config.scaling.mode;
+  const count = config.scaling.columns.filter((column) => payload.columns.includes(column)).length;
+  if (mode === "none" || !count) return "No persistent scaling";
+  return `${count.toLocaleString()} column${count === 1 ? "" : "s"} ${mode === "standardize" ? "standardized" : "normalized"}`;
+}
+
+function encodingSummaryText(config = appliedTransformConfig, payload = currentPayload || sourcePayload) {
+  if (!config || !payload) return "No dataset loaded";
+  const count = config.encoding.columns.filter((column) => payload.columns.includes(column)).length;
+  return count ? `${count.toLocaleString()} categorical column${count === 1 ? "" : "s"} one-hot encoded` : "No categorical encoding";
+}
+
+function previewConfigStatus(payload, config) {
+  if (!payload || !config) return { invalidRuleCount: 0 };
   return {
-    payload: {
-      ...payload,
-      records: preview.includedRecords,
+    invalidRuleCount:
+      filterPreviewForRules(payload, config.keepRules).invalidRuleCount
+      + filterPreviewForRules(payload, config.excludeRules).invalidRuleCount,
+  };
+}
+
+function derivePreparedPayload(payload, config) {
+  if (!payload) return null;
+  const safeConfig = cloneTransformConfig(config || defaultTransformConfig());
+  const originalRecords = payload.records.map(cloneRecord);
+  const keepPreview = filterPreviewForRules(payload, safeConfig.keepRules, "keep");
+  const keptRecords = keepPreview.includedRecords.map(cloneRecord);
+  const afterKeepCount = keptRecords.length;
+
+  const keptPayload = { ...payload, records: keptRecords };
+  const excludePreview = filterPreviewForRules(keptPayload, safeConfig.excludeRules, "exclude");
+  let workingRecords = excludePreview.includedRecords.map(cloneRecord);
+  const afterExcludeCount = workingRecords.length;
+
+  let logExcludedCount = 0;
+  const logColumns = safeConfig.log.columns.filter((column) => payload.numeric_columns.includes(column));
+  if (logColumns.length) {
+    const nextRecords = [];
+    workingRecords.forEach((row) => {
+      const nextRow = { ...row };
+      let dropRow = false;
+      logColumns.forEach((column) => {
+        const value = toFiniteNumber(nextRow[column]);
+        if (value === null) {
+          nextRow[column] = null;
+          return;
+        }
+        if (value <= 0) {
+          if (safeConfig.log.handling === "exclude") {
+            dropRow = true;
+          } else {
+            nextRow[column] = null;
+          }
+          return;
+        }
+        nextRow[column] = Math.log10(value);
+      });
+      if (dropRow) {
+        logExcludedCount += 1;
+      } else {
+        nextRecords.push(nextRow);
+      }
+    });
+    workingRecords = nextRecords;
+  }
+
+  const scalingColumns = safeConfig.scaling.columns.filter((column) => payload.numeric_columns.includes(column));
+  if (safeConfig.scaling.mode !== "none" && scalingColumns.length) {
+    const stats = new Map();
+    scalingColumns.forEach((column) => {
+      const values = workingRecords.map((row) => toFiniteNumber(row[column])).filter((value) => value !== null);
+      stats.set(column, {
+        min: values.length ? Math.min(...values) : null,
+        max: values.length ? Math.max(...values) : null,
+        mean: meanValue(values),
+        std: standardDeviation(values),
+      });
+    });
+    workingRecords = workingRecords.map((row) => {
+      const nextRow = { ...row };
+      scalingColumns.forEach((column) => {
+        const value = toFiniteNumber(nextRow[column]);
+        if (value === null) {
+          nextRow[column] = null;
+          return;
+        }
+        const columnStats = stats.get(column);
+        if (safeConfig.scaling.mode === "standardize") {
+          if (!columnStats || columnStats.std === null || columnStats.std === 0) {
+            nextRow[column] = 0;
+          } else {
+            nextRow[column] = (value - columnStats.mean) / columnStats.std;
+          }
+        } else if (!columnStats || columnStats.min === null || columnStats.max === null || columnStats.max === columnStats.min) {
+          nextRow[column] = 0;
+        } else {
+          nextRow[column] = (value - columnStats.min) / (columnStats.max - columnStats.min);
+        }
+      });
+      return nextRow;
+    });
+  }
+
+  const encodedColumns = safeConfig.encoding.columns.filter((column) => payload.columns.includes(column) && !payload.numeric_columns.includes(column));
+  let encodedAddedColumns = 0;
+  if (encodedColumns.length) {
+    const encodedValueMap = new Map();
+    encodedColumns.forEach((column) => {
+      const values = new Set();
+      workingRecords.forEach((row) => {
+        const value = normalizeValue(row[column]);
+        if (value !== null) values.add(String(value));
+      });
+      encodedValueMap.set(column, [...values].sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })));
+    });
+    workingRecords = workingRecords.map((row) => {
+      const nextRow = { ...row };
+      encodedColumns.forEach((column) => {
+        const raw = normalizeValue(row[column]);
+        const levels = encodedValueMap.get(column) || [];
+        levels.forEach((level) => {
+          nextRow[`${column}__${level}`] = raw !== null && String(raw) === level ? 1 : 0;
+        });
+        delete nextRow[column];
+      });
+      return nextRow;
+    });
+    encodedAddedColumns = [...encodedValueMap.values()].reduce((sum, values) => sum + values.length, 0);
+  }
+
+  const preparedTitle = safeConfig.scaling.mode === "none" && !logColumns.length && !encodedColumns.length && !safeConfig.keepRules.length && !safeConfig.excludeRules.length
+    ? payload.title
+    : `${payload.title} | Prepared`;
+  let derivedPayload;
+  if (!workingRecords.length) {
+    const encodedColumnNames = [];
+    encodedColumns.forEach((column) => {
+      const values = new Set(payload.records.map((row) => normalizeValue(row[column])).filter((value) => value !== null).map((value) => String(value)));
+      [...values]
+        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }))
+        .forEach((value) => encodedColumnNames.push(`${column}__${value}`));
+    });
+    const encodedSet = new Set(encodedColumns);
+    const finalColumns = payload.columns.filter((column) => !encodedSet.has(column)).concat(encodedColumnNames).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+    const finalNumericColumns = uniqueOrderedColumns([
+      ...payload.numeric_columns,
+      ...encodedColumnNames,
+    ]).filter((column) => finalColumns.includes(column)).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+    const finalColorColumns = uniqueOrderedColumns([
+      ...finalNumericColumns,
+      ...finalColumns.filter((column) => !finalNumericColumns.includes(column)),
+    ]);
+    const usedAxes = new Set();
+    const defaultX = defaultColumn(finalNumericColumns, usedAxes) || finalNumericColumns[0] || NONE_OPTION;
+    if (defaultX !== NONE_OPTION) usedAxes.add(defaultX);
+    const defaultY = defaultColumn(finalNumericColumns, usedAxes) || finalNumericColumns[0] || NONE_OPTION;
+    if (defaultY !== NONE_OPTION) usedAxes.add(defaultY);
+    const defaultZ = defaultColumn(finalNumericColumns, usedAxes) || finalNumericColumns[0] || NONE_OPTION;
+    derivedPayload = {
+      title: preparedTitle,
+      records: [],
+      columns: finalColumns,
+      numeric_columns: finalNumericColumns,
+      color_columns: finalColorColumns,
+      defaults: {
+        x: defaultX,
+        y: defaultY,
+        z: defaultZ,
+        color: defaultColumn(finalColorColumns) || NONE_OPTION,
+        size: defaultColumn(finalNumericColumns, new Set([defaultX, defaultY, defaultZ])) || NONE_OPTION,
+        hover_id: defaultColumn(finalColumns) || NONE_OPTION,
+      },
+    };
+  } else {
+    derivedPayload = buildPayload(workingRecords, preparedTitle);
+  }
+  return {
+    payload: derivedPayload,
+    preview: {
+      originalRows: originalRecords.length,
+      originalColumns: payload.columns.length,
+      afterKeepCount,
+      afterExcludeCount,
+      finalRows: derivedPayload.records.length,
+      finalColumns: derivedPayload.columns.length,
+      keepValidRuleCount: keepPreview.validRules.length,
+      excludeValidRuleCount: excludePreview.validRules.length,
+      keepInvalidRuleCount: keepPreview.invalidRuleCount,
+      excludeInvalidRuleCount: excludePreview.invalidRuleCount,
+      keptSubsetRemoved: originalRecords.length - afterKeepCount,
+      excludedByRules: afterKeepCount - afterExcludeCount,
+      excludedByLog: logExcludedCount,
+      scaledColumnCount: scalingColumns.length,
+      scalingMode: safeConfig.scaling.mode,
+      logColumnCount: logColumns.length,
+      encodedColumnCount: encodedColumns.length,
+      encodedAddedColumns,
     },
-    preview,
   };
 }
 
@@ -462,43 +747,36 @@ function datasetSummaryText() {
   if (!sourcePayload || !currentPayload) return "No dashboard loaded yet";
   const total = sourcePayload.records.length.toLocaleString();
   const included = currentPayload.records.length.toLocaleString();
-  return included === total ? `${sourcePayload.title} | ${included} rows` : `${sourcePayload.title} | ${included} of ${total} rows`;
+  const cols = currentPayload.columns.length.toLocaleString();
+  return included === total
+    ? `${sourcePayload.title} | ${included} rows | ${cols} cols`
+    : `${sourcePayload.title} | ${included} of ${total} rows | ${cols} cols`;
 }
 
-function refreshMetaMessage() {
+function refreshMetaMessage(preview = null) {
   if (!sourcePayload || !currentPayload) {
     clearMeta();
     return;
   }
-  const total = sourcePayload.records.length;
+  const safePreview = preview || derivePreparedPayload(sourcePayload, appliedTransformConfig || defaultTransformConfig())?.preview;
   const included = currentPayload.records.length;
-  const excluded = total - included;
-  const ruleCount = appliedFilterRules.filter((rule) => validateFilterRule(rule, sourcePayload)).length;
-  const base = `${included.toLocaleString()} rows included out of ${total.toLocaleString()} total across ${sourcePayload.columns.length.toLocaleString()} columns.`;
-  if (!ruleCount) {
+  const total = sourcePayload.records.length;
+  const base = `${included.toLocaleString()} rows included out of ${total.toLocaleString()} total across ${currentPayload.columns.length.toLocaleString()} prepared columns.`;
+  if (!safePreview) {
     showMeta(base);
     return;
   }
-  showMeta(`${base} ${excluded.toLocaleString()} rows excluded by ${ruleCount.toLocaleString()} filter ${ruleCount === 1 ? "rule" : "rules"}.`);
+  const notes = [];
+  if (safePreview.keptSubsetRemoved) notes.push(`${safePreview.keptSubsetRemoved.toLocaleString()} removed by subset rules`);
+  if (safePreview.excludedByRules) notes.push(`${safePreview.excludedByRules.toLocaleString()} excluded by exclusion rules`);
+  if (safePreview.excludedByLog) notes.push(`${safePreview.excludedByLog.toLocaleString()} excluded by log handling`);
+  if (safePreview.scaledColumnCount) notes.push(`${safePreview.scaledColumnCount.toLocaleString()} scaled`);
+  if (safePreview.logColumnCount) notes.push(`${safePreview.logColumnCount.toLocaleString()} log transformed`);
+  if (safePreview.encodedColumnCount) notes.push(`${safePreview.encodedColumnCount.toLocaleString()} encoded`);
+  showMeta(notes.length ? `${base} ${notes.join(" | ")}.` : base);
 }
 
-function refreshActivePayload() {
-  if (!sourcePayload) {
-    currentPayload = null;
-    frame.srcdoc = "";
-    setViewerContext("No dashboard loaded yet");
-    refreshMetaMessage();
-    renderStatsToolbar();
-    renderStatsTable();
-    renderCategoricalSummary();
-    renderCorrelationView();
-    return;
-  }
-
-  const derived = derivePayloadFromSource(sourcePayload, appliedFilterRules);
-  currentPayload = derived.payload;
-  frame.srcdoc = buildDashboardHtml(currentPayload);
-  setViewerContext(datasetSummaryText());
+function updatePreparedSelectionState() {
   selectedStatsColumns = syncSelectedColumns(currentPayload.numeric_columns, selectedStatsColumns);
   selectedCategoricalStatsColumns = syncSelectedColumns(
     categoricalColumnsForPayload(currentPayload),
@@ -514,29 +792,79 @@ function refreshActivePayload() {
   if (selectedMatrixColumns.length < 2) {
     selectedMatrixColumns = currentPayload.numeric_columns.slice(0, Math.min(8, currentPayload.numeric_columns.length));
   }
+}
+
+function refreshActivePayload() {
+  if (!sourcePayload) {
+    currentPayload = null;
+    frame.srcdoc = "";
+    setViewerContext("No dashboard loaded yet");
+    refreshMetaMessage();
+    renderTransformationView();
+    renderStatsToolbar();
+    renderStatsTable();
+    renderCategoricalSummary();
+    renderDistributionView();
+    renderCorrelationView();
+    return;
+  }
+
+  const derived = derivePreparedPayload(sourcePayload, appliedTransformConfig || defaultTransformConfig());
+  currentPayload = derived.payload;
+  frame.srcdoc = buildDashboardHtml(currentPayload);
+  setViewerContext(datasetSummaryText());
+  updatePreparedSelectionState();
+  renderTransformationView();
   renderStatsToolbar();
   renderStatsTable();
   renderCategoricalSummary();
   renderDistributionView();
   renderCorrelationView();
-  refreshMetaMessage();
+  refreshMetaMessage(derived.preview);
 }
 
-function setDraftFilterRule(ruleId, updates) {
-  draftFilterRules = draftFilterRules.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule));
-  renderFilterBuilder();
+function renderTransformTagSelector(container, columns, selectedColumns, emptyMessage, onToggle) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!columns.length) {
+    container.innerHTML = `<div class="stats-selector-empty">${escapeHtml(emptyMessage)}</div>`;
+    return;
+  }
+  columns.forEach((column) => {
+    container.appendChild(
+      createSelectorOption(column, selectedColumns.includes(column), () => onToggle(column)),
+    );
+  });
 }
 
-function removeDraftFilterRule(ruleId) {
-  draftFilterRules = draftFilterRules.filter((rule) => rule.id !== ruleId);
-  renderFilterBuilder();
+function renderScaleModeSelector() {
+  if (!transformScaleMode) return;
+  transformScaleMode.innerHTML = "";
+  const currentMode = draftTransformConfig?.scaling.mode || "none";
+  SCALING_OPTIONS.forEach((option) => {
+    const label = document.createElement("label");
+    label.className = "transform-radio-option" + (currentMode === option.value ? " active" : "");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "transform-scale-mode";
+    input.value = option.value;
+    input.checked = currentMode === option.value;
+    input.addEventListener("change", () => {
+      if (!draftTransformConfig) return;
+      draftTransformConfig.scaling.mode = option.value;
+      renderTransformationView();
+    });
+    const text = document.createElement("span");
+    text.textContent = option.label;
+    label.append(input, text);
+    transformScaleMode.appendChild(label);
+  });
 }
 
-function renderFilterBuilder() {
-  if (!filterRules || !filterEmpty || !filterImpact || !addFilterRuleButton || !clearFilterRulesButton || !applyFilterRulesButton) return;
-
+function renderRuleBuilder({ container, emptyNode, rules, labelText, operatorText, helperText, group }) {
+  if (!container || !emptyNode) return;
   const activeElement = document.activeElement;
-  const focusState = activeElement && activeElement instanceof HTMLElement && activeElement.dataset.ruleId && activeElement.dataset.field
+  const focusState = activeElement && activeElement instanceof HTMLElement && activeElement.dataset.ruleGroup === group && activeElement.dataset.ruleId && activeElement.dataset.field
     ? {
       ruleId: activeElement.dataset.ruleId,
       field: activeElement.dataset.field,
@@ -545,49 +873,27 @@ function renderFilterBuilder() {
     }
     : null;
 
-  filterRules.innerHTML = "";
-  if (!sourcePayload) {
-    filterImpact.textContent = "No dataset loaded";
-    filterEmpty.textContent = "Upload a CSV to start defining exclusion rules.";
-    filterEmpty.classList.add("visible");
-    addFilterRuleButton.disabled = true;
-    clearFilterRulesButton.disabled = true;
-    applyFilterRulesButton.disabled = true;
+  container.innerHTML = "";
+  if (!sourcePayload || !rules.length) {
+    emptyNode.classList.add("visible");
     return;
   }
+  emptyNode.classList.remove("visible");
 
-  const preview = filterPreviewForRules(sourcePayload, draftFilterRules);
-  if (draftFilterRules.length) {
-    filterEmpty.classList.remove("visible");
-  } else {
-    filterEmpty.textContent = "No exclusion rules yet. Add a rule to start filtering rows.";
-    filterEmpty.classList.add("visible");
-  }
-
-  filterImpact.textContent = preview.invalidRuleCount
-    ? `Complete ${preview.invalidRuleCount} incomplete ${preview.invalidRuleCount === 1 ? "rule" : "rules"}`
-    : `Preview: keep ${preview.includedCount.toLocaleString()} | exclude ${preview.excludedCount.toLocaleString()}`;
-  addFilterRuleButton.disabled = false;
-  clearFilterRulesButton.disabled = draftFilterRules.length === 0;
-  applyFilterRulesButton.disabled = preview.invalidRuleCount > 0;
-
-  draftFilterRules.forEach((rule, index) => {
+  rules.forEach((rule, index) => {
     const wrapper = document.createElement("div");
     wrapper.className = "filter-rule";
 
     const header = document.createElement("div");
     header.className = "filter-rule-header";
-
     const label = document.createElement("div");
     label.className = "filter-rule-label";
-    label.textContent = `Rule ${index + 1}`;
-
+    label.textContent = `${labelText} ${index + 1}`;
     const removeButton = document.createElement("button");
     removeButton.type = "button";
     removeButton.className = "secondary filter-remove";
     removeButton.textContent = "Remove";
-    removeButton.addEventListener("click", () => removeDraftFilterRule(rule.id));
-
+    removeButton.addEventListener("click", () => removeTransformRule(group, rule.id));
     header.append(label, removeButton);
 
     const grid = document.createElement("div");
@@ -598,6 +904,7 @@ function renderFilterBuilder() {
     const columnLabel = document.createElement("label");
     columnLabel.textContent = "Column";
     const columnSelect = document.createElement("select");
+    columnSelect.dataset.ruleGroup = group;
     columnSelect.dataset.ruleId = String(rule.id);
     columnSelect.dataset.field = "column";
     sourcePayload.columns.forEach((column) => {
@@ -608,7 +915,7 @@ function renderFilterBuilder() {
     });
     columnSelect.value = sourcePayload.columns.includes(rule.column) ? rule.column : sourcePayload.columns[0];
     columnSelect.addEventListener("change", () => {
-      setDraftFilterRule(rule.id, {
+      setTransformRule(group, rule.id, {
         column: columnSelect.value,
         operator: defaultOperatorForColumn(sourcePayload, columnSelect.value),
         value: "",
@@ -620,8 +927,9 @@ function renderFilterBuilder() {
     const operatorField = document.createElement("div");
     operatorField.className = "filter-field";
     const operatorLabel = document.createElement("label");
-    operatorLabel.textContent = "Exclude rows when";
+    operatorLabel.textContent = operatorText;
     const operatorSelect = document.createElement("select");
+    operatorSelect.dataset.ruleGroup = group;
     operatorSelect.dataset.ruleId = String(rule.id);
     operatorSelect.dataset.field = "operator";
     operatorsForColumn(sourcePayload, rule.column).forEach((operator) => {
@@ -630,18 +938,15 @@ function renderFilterBuilder() {
       option.textContent = operator.label;
       operatorSelect.appendChild(option);
     });
-    if ([...operatorSelect.options].some((option) => option.value === rule.operator)) {
-      operatorSelect.value = rule.operator;
-    }
+    operatorSelect.value = rule.operator;
     operatorSelect.addEventListener("change", () => {
-      setDraftFilterRule(rule.id, {
+      setTransformRule(group, rule.id, {
         operator: operatorSelect.value,
         value: "",
         value2: "",
       });
     });
     operatorField.append(operatorLabel, operatorSelect);
-
     grid.append(columnField, operatorField);
 
     const mode = filterOperatorInputMode(rule.operator);
@@ -651,6 +956,7 @@ function renderFilterBuilder() {
       const valueLabel = document.createElement("label");
       valueLabel.textContent = valueLabelForRule(sourcePayload, rule);
       const valueInput = document.createElement("input");
+      valueInput.dataset.ruleGroup = group;
       valueInput.dataset.ruleId = String(rule.id);
       valueInput.dataset.field = "value";
       valueInput.type = columnTypeForPayload(sourcePayload, rule.column) === "numeric" ? "number" : "text";
@@ -659,25 +965,26 @@ function renderFilterBuilder() {
       if (rule.operator === "eq" || rule.operator === "neq" || rule.operator === "in_list" || rule.operator === "not_in_list") {
         valueInput.type = "text";
       }
-      valueInput.addEventListener("input", () => setDraftFilterRule(rule.id, { value: valueInput.value }));
+      valueInput.addEventListener("input", () => setTransformRule(group, rule.id, { value: valueInput.value }));
       valueField.append(valueLabel, valueInput);
       grid.appendChild(valueField);
     }
 
     if (mode === "range") {
-      const valueField2 = document.createElement("div");
-      valueField2.className = "filter-field";
-      const valueLabel2 = document.createElement("label");
-      valueLabel2.textContent = valueLabelForRule(sourcePayload, rule, true);
-      const valueInput2 = document.createElement("input");
-      valueInput2.dataset.ruleId = String(rule.id);
-      valueInput2.dataset.field = "value2";
-      valueInput2.type = columnTypeForPayload(sourcePayload, rule.column) === "numeric" ? "number" : "text";
-      valueInput2.placeholder = previewPlaceholderForRule(sourcePayload, rule);
-      valueInput2.value = rule.value2;
-      valueInput2.addEventListener("input", () => setDraftFilterRule(rule.id, { value2: valueInput2.value }));
-      valueField2.append(valueLabel2, valueInput2);
-      grid.appendChild(valueField2);
+      const secondField = document.createElement("div");
+      secondField.className = "filter-field";
+      const secondLabel = document.createElement("label");
+      secondLabel.textContent = valueLabelForRule(sourcePayload, rule, true);
+      const secondInput = document.createElement("input");
+      secondInput.dataset.ruleGroup = group;
+      secondInput.dataset.ruleId = String(rule.id);
+      secondInput.dataset.field = "value2";
+      secondInput.type = columnTypeForPayload(sourcePayload, rule.column) === "numeric" ? "number" : "text";
+      secondInput.placeholder = previewPlaceholderForRule(sourcePayload, rule);
+      secondInput.value = rule.value2;
+      secondInput.addEventListener("input", () => setTransformRule(group, rule.id, { value2: secondInput.value }));
+      secondField.append(secondLabel, secondInput);
+      grid.appendChild(secondField);
     }
 
     const help = document.createElement("div");
@@ -686,16 +993,16 @@ function renderFilterBuilder() {
       ? " Use commas to enter multiple values."
       : "";
     help.textContent = validateFilterRule(rule, sourcePayload)
-      ? `Rows matching this rule ${draftFilterRules.length > 1 ? "and the other rules" : ""} will be excluded from all views.${multiValueHint}`
-      : `Complete this rule to include it in the exclusion preview.${multiValueHint}`;
+      ? `${helperText}${multiValueHint}`
+      : `Complete this rule to include it in the preview.${multiValueHint}`;
 
     wrapper.append(header, grid, help);
-    filterRules.appendChild(wrapper);
+    container.appendChild(wrapper);
   });
 
   if (focusState) {
-    const selector = `[data-rule-id="${focusState.ruleId}"][data-field="${focusState.field}"]`;
-    const nextField = filterRules.querySelector(selector);
+    const selector = `[data-rule-group="${group}"][data-rule-id="${focusState.ruleId}"][data-field="${focusState.field}"]`;
+    const nextField = container.querySelector(selector);
     if (nextField instanceof HTMLElement) {
       nextField.focus();
       if ("setSelectionRange" in nextField && focusState.selectionStart !== null && focusState.selectionEnd !== null) {
@@ -707,6 +1014,170 @@ function renderFilterBuilder() {
       }
     }
   }
+}
+
+function renderPreviewCards(preview) {
+  if (!transformPreviewGrid) return;
+  if (!preview) {
+    transformPreviewGrid.innerHTML = "";
+    return;
+  }
+  const cards = [
+    { label: "Rows", value: `${preview.finalRows.toLocaleString()} / ${preview.originalRows.toLocaleString()}`, note: "Prepared vs raw" },
+    { label: "Columns", value: `${preview.finalColumns.toLocaleString()} / ${preview.originalColumns.toLocaleString()}`, note: "Prepared vs raw" },
+    { label: "Subset Rules", value: `${preview.keepValidRuleCount.toLocaleString()}`, note: `${preview.keptSubsetRemoved.toLocaleString()} rows removed` },
+    { label: "Exclusion Rules", value: `${preview.excludeValidRuleCount.toLocaleString()}`, note: `${preview.excludedByRules.toLocaleString()} rows removed` },
+    { label: "Scaling", value: preview.scaledColumnCount.toLocaleString(), note: preview.scalingMode === "none" ? "No scaling" : preview.scalingMode },
+    { label: "Encoding", value: preview.encodedColumnCount.toLocaleString(), note: `${preview.encodedAddedColumns.toLocaleString()} columns added` },
+  ];
+  transformPreviewGrid.innerHTML = cards.map((item) => `
+    <div class="corr-metric-card">
+      <div class="corr-metric-label">${escapeHtml(item.label)}</div>
+      <div class="corr-metric-value">${escapeHtml(item.value)}</div>
+      <div class="transform-metric-note">${escapeHtml(item.note)}</div>
+    </div>
+  `).join("");
+}
+
+function renderPreviewTable(payload) {
+  if (!transformPreviewTable) return;
+  if (!payload) {
+    transformPreviewTable.innerHTML = '<div class="stats-empty">Upload a CSV to preview prepared data.</div>';
+    return;
+  }
+  if (!payload.records.length) {
+    transformPreviewTable.innerHTML = '<div class="stats-empty">No rows remain after the current draft changes.</div>';
+    return;
+  }
+  const previewColumns = payload.columns.slice(0, 8);
+  const previewRows = payload.records.slice(0, 8);
+  let html = '<table class="stats-table"><thead><tr>';
+  previewColumns.forEach((column) => {
+    html += `<th>${escapeHtml(column)}</th>`;
+  });
+  html += "</tr></thead><tbody>";
+  previewRows.forEach((row) => {
+    html += "<tr>";
+    previewColumns.forEach((column) => {
+      html += `<td>${escapeHtml(formatStatValue(row[column]))}</td>`;
+    });
+    html += "</tr>";
+  });
+  html += "</tbody></table>";
+  transformPreviewTable.innerHTML = html;
+}
+
+function renderPrepSummary(preview) {
+  if (!prepImpact || !prepSummaryGrid || !prepSummaryEmpty) return;
+  if (!sourcePayload || !currentPayload || !appliedTransformConfig) {
+    prepImpact.textContent = "No dataset loaded";
+    prepSummaryGrid.innerHTML = "";
+    prepSummaryEmpty.classList.add("visible");
+    return;
+  }
+  prepSummaryEmpty.classList.toggle("visible", false);
+  prepImpact.textContent = `${currentPayload.records.length.toLocaleString()} rows | ${currentPayload.columns.length.toLocaleString()} cols`;
+  const appliedPreview = preview || derivePreparedPayload(sourcePayload, appliedTransformConfig)?.preview;
+  const items = [
+    scalingSummaryText(appliedTransformConfig, sourcePayload),
+    appliedTransformConfig.log.columns.length ? `${appliedTransformConfig.log.columns.length.toLocaleString()} log transform${appliedTransformConfig.log.columns.length === 1 ? "" : "s"}` : "No log transforms",
+    encodingSummaryText(appliedTransformConfig, sourcePayload),
+    appliedPreview?.keepValidRuleCount ? `${appliedPreview.keepValidRuleCount.toLocaleString()} subset rule${appliedPreview.keepValidRuleCount === 1 ? "" : "s"}` : "No subset rules",
+    appliedPreview?.excludeValidRuleCount ? `${appliedPreview.excludeValidRuleCount.toLocaleString()} exclusion rule${appliedPreview.excludeValidRuleCount === 1 ? "" : "s"}` : "No exclusion rules",
+  ];
+  prepSummaryGrid.innerHTML = items.map((item) => `<div class="prep-summary-item">${escapeHtml(item)}</div>`).join("");
+}
+
+function renderTransformationView() {
+  renderScaleModeSelector();
+  if (!sourcePayload || !draftTransformConfig) {
+    if (transformSummarySubtitle) transformSummarySubtitle.textContent = "Upload a CSV to begin preparing the dataset.";
+    if (transformImpactGrid) transformImpactGrid.innerHTML = "";
+    if (transformApplyNote) transformApplyNote.textContent = "Draft changes are previewed here first and only affect the analytical tabs after you apply them.";
+    if (transformPreviewSubtitle) transformPreviewSubtitle.textContent = "Preview how the applied pipeline will change rows, columns, and data types.";
+    if (transformPreviewNote) transformPreviewNote.textContent = "No preview available yet.";
+    renderPreviewCards(null);
+    renderPreviewTable(null);
+    renderPrepSummary(null);
+    renderRuleBuilder({ container: keepRules, emptyNode: keepEmpty, rules: [], labelText: "Keep Rule", operatorText: "Keep rows when", helperText: "", group: "keepRules" });
+    renderRuleBuilder({ container: excludeRules, emptyNode: excludeEmpty, rules: [], labelText: "Exclusion Rule", operatorText: "Exclude rows when", helperText: "", group: "excludeRules" });
+    return;
+  }
+
+  const numericColumns = sourcePayload.numeric_columns;
+  const categoricalColumns = categoricalColumnsForPayload(sourcePayload);
+  renderTransformTagSelector(transformScaleColumns, numericColumns, draftTransformConfig.scaling.columns, "No numeric columns available.", (column) => toggleTransformColumn("scaling", column));
+  renderTransformTagSelector(transformLogColumns, numericColumns, draftTransformConfig.log.columns, "No numeric columns available.", (column) => toggleTransformColumn("log", column));
+  renderTransformTagSelector(transformEncodeColumns, categoricalColumns, draftTransformConfig.encoding.columns, "No categorical columns available.", (column) => toggleTransformColumn("encoding", column));
+  if (transformLogHandling) transformLogHandling.value = draftTransformConfig.log.handling;
+
+  const status = previewConfigStatus(sourcePayload, draftTransformConfig);
+  const previewResult = status.invalidRuleCount ? null : derivePreparedPayload(sourcePayload, draftTransformConfig);
+  const hasDraftChanges = JSON.stringify(draftTransformConfig) !== JSON.stringify(appliedTransformConfig || defaultTransformConfig());
+  const cards = [
+    { label: "Scaling", value: scalingSummaryText(draftTransformConfig, sourcePayload) },
+    { label: "Encoding", value: encodingSummaryText(draftTransformConfig, sourcePayload) },
+    { label: "Subset", value: `${validRuleCount(sourcePayload, draftTransformConfig.keepRules).toLocaleString()} active rule${validRuleCount(sourcePayload, draftTransformConfig.keepRules) === 1 ? "" : "s"}` },
+    { label: "Exclusions", value: `${validRuleCount(sourcePayload, draftTransformConfig.excludeRules).toLocaleString()} active rule${validRuleCount(sourcePayload, draftTransformConfig.excludeRules) === 1 ? "" : "s"}` },
+  ];
+  if (transformSummarySubtitle) {
+    transformSummarySubtitle.textContent = hasDraftChanges ? "Draft changes are ready to apply across every analysis tab." : "Draft matches the currently applied prepared dataset.";
+  }
+  if (transformImpactGrid) {
+    transformImpactGrid.innerHTML = cards.map((item) => `
+      <div class="corr-metric-card">
+        <div class="corr-metric-label">${escapeHtml(item.label)}</div>
+        <div class="corr-metric-value">${escapeHtml(item.value)}</div>
+      </div>
+    `).join("");
+  }
+  if (transformApplyNote) {
+    transformApplyNote.textContent = status.invalidRuleCount
+      ? `Complete ${status.invalidRuleCount} incomplete rule${status.invalidRuleCount === 1 ? "" : "s"} before applying.`
+      : "Apply changes to rebuild the prepared dataset used by the 3D view, statistics, distributions, and correlation tabs.";
+  }
+  if (transformApplyButton) transformApplyButton.disabled = status.invalidRuleCount > 0 || !hasDraftChanges;
+  if (transformResetButton) transformResetButton.disabled = !hasDraftChanges;
+  if (addKeepRuleButton) addKeepRuleButton.disabled = false;
+  if (clearKeepRulesButton) clearKeepRulesButton.disabled = !draftTransformConfig.keepRules.length;
+  if (addExcludeRuleButton) addExcludeRuleButton.disabled = false;
+  if (clearExcludeRulesButton) clearExcludeRulesButton.disabled = !draftTransformConfig.excludeRules.length;
+
+  renderRuleBuilder({
+    container: keepRules,
+    emptyNode: keepEmpty,
+    rules: draftTransformConfig.keepRules,
+    labelText: "Keep Rule",
+    operatorText: "Keep rows when",
+    helperText: "Only rows matching this rule and the other keep rules remain in the prepared dataset.",
+    group: "keepRules",
+  });
+  renderRuleBuilder({
+    container: excludeRules,
+    emptyNode: excludeEmpty,
+    rules: draftTransformConfig.excludeRules,
+    labelText: "Exclusion Rule",
+    operatorText: "Exclude rows when",
+    helperText: "Rows matching this rule and the other exclusion rules are removed from the prepared dataset.",
+    group: "excludeRules",
+  });
+
+  if (!previewResult) {
+    if (transformPreviewSubtitle) transformPreviewSubtitle.textContent = "Complete every rule to regenerate the prepared dataset preview.";
+    if (transformPreviewNote) transformPreviewNote.textContent = "Preview is paused until all draft rules are valid.";
+    renderPreviewCards(null);
+    renderPreviewTable({ columns: [], records: [] });
+  } else {
+    if (transformPreviewSubtitle) transformPreviewSubtitle.textContent = `Previewing ${previewResult.payload.records.length.toLocaleString()} rows across ${previewResult.payload.columns.length.toLocaleString()} columns after draft changes.`;
+    if (transformPreviewNote) {
+      transformPreviewNote.textContent = previewResult.preview.excludedByLog
+        ? `${previewResult.preview.excludedByLog.toLocaleString()} row${previewResult.preview.excludedByLog === 1 ? "" : "s"} would be excluded because selected log transforms require positive values.`
+        : "Preview reflects the draft pipeline in order: subset, exclude, log transform, scale, then encode.";
+    }
+    renderPreviewCards(previewResult.preview);
+    renderPreviewTable(previewResult.payload);
+  }
+  renderPrepSummary();
 }
 
 function meanValue(values) {
@@ -2507,19 +2978,25 @@ function renderDistributionView() {
 
 function setOuterView(view) {
   activeOuterView = view;
-  if (!dashboardTab || !statisticsTab || !distributionTab || !correlationTab || !dashboardPanel || !statisticsPanel || !distributionPanel || !correlationPanel) return;
+  if (!dashboardTab || !transformationTab || !statisticsTab || !distributionTab || !correlationTab || !dashboardPanel || !transformationPanel || !statisticsPanel || !distributionPanel || !correlationPanel) return;
   const showDashboard = view === "dashboard";
+  const showTransformation = view === "transformation";
   const showStatistics = view === "statistics";
   const showDistribution = view === "distribution";
   const showCorrelation = view === "correlation";
   dashboardTab.classList.toggle("active", showDashboard);
+  transformationTab.classList.toggle("active", showTransformation);
   statisticsTab.classList.toggle("active", showStatistics);
   distributionTab.classList.toggle("active", showDistribution);
   correlationTab.classList.toggle("active", showCorrelation);
   dashboardPanel.classList.toggle("hidden", !showDashboard);
+  transformationPanel.classList.toggle("hidden", !showTransformation);
   statisticsPanel.classList.toggle("hidden", !showStatistics);
   distributionPanel.classList.toggle("hidden", !showDistribution);
   correlationPanel.classList.toggle("hidden", !showCorrelation);
+  if (showTransformation) {
+    renderTransformationView();
+  }
   if (showDistribution) {
     renderDistributionView();
     setTimeout(() => resizeDistributionPlot(), 0);
@@ -3501,8 +3978,8 @@ clearButton.addEventListener("click", () => {
   form.reset();
   sourcePayload = null;
   currentPayload = null;
-  draftFilterRules = [];
-  appliedFilterRules = [];
+  draftTransformConfig = null;
+  appliedTransformConfig = null;
   frame.srcdoc = "";
   setViewerContext("No dashboard loaded yet");
   emptyState.classList.remove("hidden");
@@ -3525,7 +4002,7 @@ clearButton.addEventListener("click", () => {
   selectedMatrixColumns = [];
   focusedMatrixPair = null;
   correlationMode = "pair";
-  renderFilterBuilder();
+  renderTransformationView();
   renderStatsToolbar();
   renderStatsTable();
   renderCategoricalSummary();
@@ -3537,8 +4014,9 @@ clearButton.addEventListener("click", () => {
   clearError();
 });
 
-if (dashboardTab && statisticsTab && distributionTab && correlationTab) {
+if (dashboardTab && transformationTab && statisticsTab && distributionTab && correlationTab) {
   dashboardTab.addEventListener("click", () => setOuterView("dashboard"));
+  transformationTab.addEventListener("click", () => setOuterView("transformation"));
   statisticsTab.addEventListener("click", () => setOuterView("statistics"));
   distributionTab.addEventListener("click", () => setOuterView("distribution"));
   correlationTab.addEventListener("click", () => setOuterView("correlation"));
@@ -3658,35 +4136,60 @@ if (distViolinSaveButton) {
     download2DPlotImage("dist-violin-plot", `${safeDatasetStem()}_violin_${variable}`);
   });
 }
-if (addFilterRuleButton) {
-  addFilterRuleButton.addEventListener("click", () => {
-    if (!sourcePayload) return;
-    draftFilterRules = [...draftFilterRules, createFilterRule(sourcePayload)];
-    renderFilterBuilder();
+if (transformLogHandling) {
+  transformLogHandling.addEventListener("change", () => {
+    if (!draftTransformConfig) return;
+    draftTransformConfig.log.handling = transformLogHandling.value === "exclude" ? "exclude" : "missing";
+    renderTransformationView();
   });
 }
-if (clearFilterRulesButton) {
-  clearFilterRulesButton.addEventListener("click", () => {
-    draftFilterRules = [];
-    appliedFilterRules = [];
-    if (sourcePayload) {
-      refreshActivePayload();
-    }
-    renderFilterBuilder();
+if (addKeepRuleButton) {
+  addKeepRuleButton.addEventListener("click", () => {
+    if (!sourcePayload || !draftTransformConfig) return;
+    draftTransformConfig.keepRules = [...draftTransformConfig.keepRules, createTransformRule("keepRules")];
+    renderTransformationView();
   });
 }
-if (applyFilterRulesButton) {
-  applyFilterRulesButton.addEventListener("click", () => {
-    if (!sourcePayload) return;
-    const invalidRuleCount = filterPreviewForRules(sourcePayload, draftFilterRules).invalidRuleCount;
-    if (invalidRuleCount) {
-      showError(`Complete ${invalidRuleCount} incomplete filter ${invalidRuleCount === 1 ? "rule" : "rules"} before applying.`);
+if (clearKeepRulesButton) {
+  clearKeepRulesButton.addEventListener("click", () => {
+    if (!draftTransformConfig) return;
+    draftTransformConfig.keepRules = [];
+    renderTransformationView();
+  });
+}
+if (addExcludeRuleButton) {
+  addExcludeRuleButton.addEventListener("click", () => {
+    if (!sourcePayload || !draftTransformConfig) return;
+    draftTransformConfig.excludeRules = [...draftTransformConfig.excludeRules, createTransformRule("excludeRules")];
+    renderTransformationView();
+  });
+}
+if (clearExcludeRulesButton) {
+  clearExcludeRulesButton.addEventListener("click", () => {
+    if (!draftTransformConfig) return;
+    draftTransformConfig.excludeRules = [];
+    renderTransformationView();
+  });
+}
+if (transformResetButton) {
+  transformResetButton.addEventListener("click", () => {
+    draftTransformConfig = cloneTransformConfig(appliedTransformConfig || defaultTransformConfig());
+    clearError();
+    renderTransformationView();
+  });
+}
+if (transformApplyButton) {
+  transformApplyButton.addEventListener("click", () => {
+    if (!sourcePayload || !draftTransformConfig) return;
+    const status = previewConfigStatus(sourcePayload, draftTransformConfig);
+    if (status.invalidRuleCount) {
+      showError(`Complete ${status.invalidRuleCount} incomplete rule${status.invalidRuleCount === 1 ? "" : "s"} before applying.`);
       return;
     }
     clearError();
-    appliedFilterRules = draftFilterRules.map(cloneFilterRule);
+    appliedTransformConfig = cloneTransformConfig(draftTransformConfig);
     refreshActivePayload();
-    renderFilterBuilder();
+    renderTransformationView();
   });
 }
 if (corrPairModeButton) {
@@ -3779,4 +4282,4 @@ renderCategoricalSummary();
 renderDistributionView();
 updateCorrelationAlphaLabel();
 renderCorrelationView();
-renderFilterBuilder();
+renderTransformationView();

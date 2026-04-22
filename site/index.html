@@ -39,22 +39,17 @@
         </div>
       </form>
 
-      <section class="filter-card" id="filter-card" aria-labelledby="filter-title">
+      <section class="prep-summary-card" id="prep-summary-card" aria-labelledby="prep-summary-title">
         <div class="filter-card-header">
           <div>
-            <div class="filter-card-kicker">Data Filters</div>
-            <h2 class="filter-card-title" id="filter-title">Define row exclusions</h2>
+            <div class="filter-card-kicker">Data Preparation</div>
+            <h2 class="filter-card-title" id="prep-summary-title">Active transformation pipeline</h2>
           </div>
-          <div class="filter-impact" id="filter-impact">No dataset loaded</div>
+          <div class="filter-impact" id="prep-impact">No dataset loaded</div>
         </div>
-        <p class="filter-card-copy">Create flat AND rules to exclude rows before charts, statistics, and correlation analysis run.</p>
-        <div class="filter-rules" id="filter-rules"></div>
-        <div class="filter-empty" id="filter-empty">Upload a CSV to start defining exclusion rules.</div>
-        <div class="filter-actions">
-          <button class="secondary" id="add-filter-rule-button" type="button">Add Rule</button>
-          <button class="secondary" id="clear-filter-rules-button" type="button">Clear Rules</button>
-          <button class="primary" id="apply-filter-rules-button" type="button">Apply Filters</button>
-        </div>
+        <p class="filter-card-copy">Manage scaling, encoding, subsetting, and exclusion rules from the Data Transformation tab. All other views use the applied prepared dataset.</p>
+        <div class="prep-summary-grid" id="prep-summary-grid"></div>
+        <div class="prep-summary-empty visible" id="prep-summary-empty">Upload a CSV to start preparing the dataset.</div>
       </section>
 
       <div class="meta" id="meta"></div>
@@ -66,6 +61,7 @@
       <div class="viewer-header">
         <div class="viewer-tabs">
           <button class="viewer-tab active" id="dashboard-tab" type="button">3D Dashboard</button>
+          <button class="viewer-tab" id="transformation-tab" type="button">Data Transformation</button>
           <button class="viewer-tab" id="statistics-tab" type="button">Statistics</button>
           <button class="viewer-tab" id="distribution-tab" type="button">Distributions</button>
           <button class="viewer-tab" id="correlation-tab" type="button">Correlation</button>
@@ -89,6 +85,113 @@
         </div>
         <div class="viewer-panel" id="dashboard-panel">
           <iframe id="dashboard-frame" title="Dashboard preview"></iframe>
+        </div>
+        <div class="viewer-panel hidden" id="transformation-panel">
+          <div class="transform-stage">
+            <div class="stats-section-title">Data Transformation</div>
+            <div class="transform-layout">
+              <aside class="transform-sidebar">
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Pipeline Summary</div>
+                      <div class="stats-control-subtitle" id="transform-summary-subtitle">Upload a CSV to begin preparing the dataset.</div>
+                    </div>
+                    <div class="stats-control-actions">
+                      <button class="stats-control-action" id="transform-reset-button" type="button">Reset Draft</button>
+                      <button class="primary transform-apply-button" id="transform-apply-button" type="button">Apply Changes</button>
+                    </div>
+                  </div>
+                  <div class="transform-impact-grid" id="transform-impact-grid"></div>
+                  <div class="stats-copy" id="transform-apply-note">Draft changes are previewed here first and only affect the analytical tabs after you apply them.</div>
+                </div>
+
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Numeric Scaling</div>
+                      <div class="stats-control-subtitle">Apply a persistent scaling transform to selected numeric columns.</div>
+                    </div>
+                  </div>
+                  <div class="transform-radio-row" id="transform-scale-mode"></div>
+                  <div class="transform-tag-selector" id="transform-scale-columns"></div>
+                </div>
+
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Log Scaling</div>
+                      <div class="stats-control-subtitle">Convert selected numeric columns to `log10(column)` before analysis.</div>
+                    </div>
+                  </div>
+                  <div class="transform-inline-fields">
+                    <div class="dist-field">
+                      <label for="transform-log-handling">When values are <= 0</label>
+                      <select id="transform-log-handling">
+                        <option value="missing">Set transformed value to missing</option>
+                        <option value="exclude">Exclude the row</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="transform-tag-selector" id="transform-log-columns"></div>
+                </div>
+
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Categorical Encoding</div>
+                      <div class="stats-control-subtitle">Create numeric one-hot columns from selected categorical variables.</div>
+                    </div>
+                  </div>
+                  <div class="transform-tag-selector" id="transform-encode-columns"></div>
+                </div>
+
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Subset Rows</div>
+                      <div class="stats-control-subtitle">Keep only rows that match every rule below.</div>
+                    </div>
+                    <div class="stats-control-actions">
+                      <button class="stats-control-action" id="add-keep-rule-button" type="button">Add Keep Rule</button>
+                      <button class="stats-control-action" id="clear-keep-rules-button" type="button">Clear</button>
+                    </div>
+                  </div>
+                  <div class="filter-rules" id="keep-rules"></div>
+                  <div class="filter-empty" id="keep-empty">No subset rules yet. Add a rule to keep only matching rows.</div>
+                </div>
+
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Exclusion Rules</div>
+                      <div class="stats-control-subtitle">Exclude rows that match every rule below, similar to the existing filter workflow.</div>
+                    </div>
+                    <div class="stats-control-actions">
+                      <button class="stats-control-action" id="add-exclude-rule-button" type="button">Add Exclusion Rule</button>
+                      <button class="stats-control-action" id="clear-exclude-rules-button" type="button">Clear</button>
+                    </div>
+                  </div>
+                  <div class="filter-rules" id="exclude-rules"></div>
+                  <div class="filter-empty" id="exclude-empty">No exclusion rules yet. Add a rule to remove matching rows.</div>
+                </div>
+              </aside>
+
+              <main class="transform-main">
+                <div class="stats-control-panel">
+                  <div class="stats-control-header">
+                    <div>
+                      <div class="stats-control-title">Prepared Dataset Preview</div>
+                      <div class="stats-control-subtitle" id="transform-preview-subtitle">Preview how the applied pipeline will change rows, columns, and data types.</div>
+                    </div>
+                  </div>
+                  <div class="transform-preview-grid" id="transform-preview-grid"></div>
+                  <div class="transform-preview-note" id="transform-preview-note">No preview available yet.</div>
+                  <div class="stats-sheet transform-preview-table" id="transform-preview-table"></div>
+                </div>
+              </main>
+            </div>
+          </div>
         </div>
         <div class="viewer-panel hidden" id="statistics-panel">
           <div class="stats-stage">
