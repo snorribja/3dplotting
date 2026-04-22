@@ -13,6 +13,12 @@ const meta = document.getElementById("meta");
 const error = document.getElementById("error");
 const viewerContext = document.getElementById("viewer-context") || document.getElementById("viewer-title");
 const clearButton = document.getElementById("clear-button");
+const filterRules = document.getElementById("filter-rules");
+const filterEmpty = document.getElementById("filter-empty");
+const filterImpact = document.getElementById("filter-impact");
+const addFilterRuleButton = document.getElementById("add-filter-rule-button");
+const clearFilterRulesButton = document.getElementById("clear-filter-rules-button");
+const applyFilterRulesButton = document.getElementById("apply-filter-rules-button");
 const emptyState = document.getElementById("empty-state");
 const loadingState = document.getElementById("loading-state");
 const loadingTitle = document.getElementById("loading-title");
@@ -35,6 +41,7 @@ const corrXSelect = document.getElementById("corr-x-select");
 const corrYSelect = document.getElementById("corr-y-select");
 const corrAlphaSlider = document.getElementById("corr-alpha-slider");
 const corrAlphaValue = document.getElementById("corr-alpha-value");
+const corrFitSelect = document.getElementById("corr-fit-select");
 const corrPairMetrics = document.getElementById("corr-pair-metrics");
 const corrPairPlot = document.getElementById("corr-pair-plot");
 const corrMatrixMethod = document.getElementById("corr-matrix-method");
@@ -51,13 +58,41 @@ const corrFocusSaveButton = document.getElementById("corr-focus-save-button");
 const emptyStateKicker = document.querySelector(".empty-state-kicker");
 const emptyStateTitle = document.querySelector(".empty-state-title");
 const emptyStateCopy = document.querySelector(".empty-state-copy");
+let sourcePayload = null;
 let currentPayload = null;
+let draftFilterRules = [];
+let appliedFilterRules = [];
 let selectedStatsColumns = [];
 let activeOuterView = "dashboard";
 let correlationMode = "pair";
 let selectedMatrixColumns = [];
 let focusedMatrixPair = null;
 let currentMatrixPairLookup = new Map();
+let nextFilterRuleId = 1;
+const FILTER_OPERATORS = {
+  numeric: [
+    { value: "eq", label: "is equal to" },
+    { value: "neq", label: "is not equal to" },
+    { value: "gt", label: "is greater than" },
+    { value: "gte", label: "is at least" },
+    { value: "lt", label: "is less than" },
+    { value: "lte", label: "is at most" },
+    { value: "between", label: "is between" },
+    { value: "not_between", label: "is not between" },
+    { value: "is_missing", label: "is missing" },
+    { value: "is_not_missing", label: "is not missing" },
+  ],
+  text: [
+    { value: "eq", label: "is equal to" },
+    { value: "neq", label: "is not equal to" },
+    { value: "contains", label: "contains" },
+    { value: "not_contains", label: "does not contain" },
+    { value: "in_list", label: "is in list" },
+    { value: "not_in_list", label: "is not in list" },
+    { value: "is_missing", label: "is missing" },
+    { value: "is_not_missing", label: "is not missing" },
+  ],
+};
 const STAT_TERM_EXPLANATIONS = {
   "Parameter": "The dataset feature (column) this row represents.",
   "Mean ± Std": "Mean is the average value. Std (standard deviation) shows how spread out the values are around the mean.",
@@ -70,6 +105,13 @@ const STAT_TERM_EXPLANATIONS = {
   "Unique Values": "Number of distinct category values.",
   "Top Value": "Most frequent category value (mode).",
   "Top Frequency": "How many times the top value appears.",
+};
+const CORRELATION_METRIC_EXPLANATIONS = {
+  "Pearson": "Measures linear relationship from -1 to 1. Values near 1 or -1 indicate a strong straight-line relationship; values near 0 indicate little linear association.",
+  "Spearman": "Measures monotonic rank relationship from -1 to 1. It is more robust to outliers and captures ordered trends even when the relationship is not perfectly linear.",
+  "Rows Used": "Number of rows with usable values for both selected variables after filtering and missing-value handling.",
+  "Curve": "Shows which trendline is currently drawn on the scatter plot. Linear is a straight line; non-linear selects the better quadratic or cubic fit.",
+  "Fit R²": "Indicates how much variance in Y is explained by the displayed trendline. Closer to 1 means the fitted curve tracks the data more closely.",
 };
 
 function setViewerContext(text) {
@@ -114,6 +156,437 @@ function showMeta(message) {
 function clearMeta() {
   meta.textContent = "";
   meta.style.display = "none";
+}
+
+function cloneFilterRule(rule) {
+  return { ...rule };
+}
+
+function columnTypeForPayload(payload, column) {
+  if (!payload || !column) return "text";
+  return payload.numeric_columns.includes(column) ? "numeric" : "text";
+}
+
+function operatorsForColumn(payload, column) {
+  return FILTER_OPERATORS[columnTypeForPayload(payload, column)];
+}
+
+function defaultOperatorForColumn(payload, column) {
+  return operatorsForColumn(payload, column)[0]?.value || "eq";
+}
+
+function createFilterRule(payload = sourcePayload) {
+  const firstColumn = payload?.columns?.[0] || "";
+  return {
+    id: nextFilterRuleId++,
+    column: firstColumn,
+    operator: defaultOperatorForColumn(payload, firstColumn),
+    value: "",
+    value2: "",
+  };
+}
+
+function filterOperatorInputMode(operator) {
+  if (operator === "between" || operator === "not_between") return "range";
+  if (operator === "is_missing" || operator === "is_not_missing") return "none";
+  return "single";
+}
+
+function valueLabelForRule(payload, rule, second = false) {
+  const isNumeric = columnTypeForPayload(payload, rule.column) === "numeric";
+  if (filterOperatorInputMode(rule.operator) === "range") {
+    return second ? "Maximum value" : "Minimum value";
+  }
+  if (!isNumeric && (rule.operator === "in_list" || rule.operator === "not_in_list")) {
+    return "Values (comma-separated)";
+  }
+  return isNumeric ? "Value" : "Text";
+}
+
+function previewPlaceholderForRule(payload, rule) {
+  const isNumeric = columnTypeForPayload(payload, rule.column) === "numeric";
+  if (rule.operator === "eq" || rule.operator === "neq" || rule.operator === "in_list" || rule.operator === "not_in_list") {
+    return isNumeric ? "12, 18, 24" : "A, B, C";
+  }
+  return isNumeric ? "Enter a number" : "Enter a value";
+}
+
+function normalizeTextValue(value) {
+  const normalized = normalizeValue(value);
+  return normalized === null ? null : String(normalized).toLowerCase();
+}
+
+function parseFilterList(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function parseNumericFilterList(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry) => toFiniteNumber(entry.trim()))
+    .filter((entry) => entry !== null);
+}
+
+function validateFilterRule(rule, payload) {
+  if (!payload || !rule || !payload.columns.includes(rule.column)) return false;
+  const operator = operatorsForColumn(payload, rule.column).find((entry) => entry.value === rule.operator);
+  if (!operator) return false;
+  const mode = filterOperatorInputMode(rule.operator);
+  if (mode === "none") return true;
+
+  const isNumeric = columnTypeForPayload(payload, rule.column) === "numeric";
+  const firstValue = isNumeric ? toFiniteNumber(rule.value) : normalizeValue(rule.value);
+  const allowsMultiValue = rule.operator === "eq" || rule.operator === "neq" || rule.operator === "in_list" || rule.operator === "not_in_list";
+  if (allowsMultiValue) {
+    const parsedValues = isNumeric ? parseNumericFilterList(rule.value) : parseFilterList(rule.value);
+    if (!parsedValues.length) return false;
+  } else if (firstValue === null || firstValue === "") {
+    return false;
+  }
+  if (mode === "single") return true;
+
+  const secondValue = isNumeric ? toFiniteNumber(rule.value2) : normalizeValue(rule.value2);
+  return secondValue !== null && secondValue !== "";
+}
+
+function rowMatchesFilterRule(row, rule, payload) {
+  const rawValue = normalizeValue(row[rule.column]);
+  const numericValue = toFiniteNumber(rawValue);
+  const isNumeric = columnTypeForPayload(payload, rule.column) === "numeric";
+  const mode = filterOperatorInputMode(rule.operator);
+  const firstValue = isNumeric ? toFiniteNumber(rule.value) : normalizeValue(rule.value);
+  const secondValue = isNumeric ? toFiniteNumber(rule.value2) : normalizeValue(rule.value2);
+  const textValue = normalizeTextValue(rawValue);
+  const comparisonText = normalizeTextValue(firstValue);
+  const textList = parseFilterList(rule.value);
+  const numericList = parseNumericFilterList(rule.value);
+
+  switch (rule.operator) {
+    case "is_missing":
+      return rawValue === null;
+    case "is_not_missing":
+      return rawValue !== null;
+    case "eq":
+      return isNumeric
+        ? (numericValue !== null && numericList.includes(numericValue))
+        : textValue !== null && textList.includes(textValue);
+    case "neq":
+      return isNumeric
+        ? (numericValue !== null && !numericList.includes(numericValue))
+        : textValue !== null && !textList.includes(textValue);
+    case "gt":
+      return numericValue !== null && firstValue !== null && numericValue > firstValue;
+    case "gte":
+      return numericValue !== null && firstValue !== null && numericValue >= firstValue;
+    case "lt":
+      return numericValue !== null && firstValue !== null && numericValue < firstValue;
+    case "lte":
+      return numericValue !== null && firstValue !== null && numericValue <= firstValue;
+    case "between":
+      return numericValue !== null && firstValue !== null && secondValue !== null && numericValue >= Math.min(firstValue, secondValue) && numericValue <= Math.max(firstValue, secondValue);
+    case "not_between":
+      return numericValue !== null && firstValue !== null && secondValue !== null && (numericValue < Math.min(firstValue, secondValue) || numericValue > Math.max(firstValue, secondValue));
+    case "contains":
+      return textValue !== null && comparisonText !== null && textValue.includes(comparisonText);
+    case "not_contains":
+      return textValue !== null && comparisonText !== null && !textValue.includes(comparisonText);
+    case "in_list": {
+      return isNumeric
+        ? (numericValue !== null && numericList.includes(numericValue))
+        : textValue !== null && textList.includes(textValue);
+    }
+    case "not_in_list": {
+      return isNumeric
+        ? (numericValue !== null && !numericList.includes(numericValue))
+        : textValue !== null && !textList.includes(textValue);
+    }
+    default:
+      return false;
+  }
+}
+
+function filterPreviewForRules(payload, rules) {
+  if (!payload) {
+    return { includedRecords: [], excludedCount: 0, includedCount: 0, invalidRuleCount: 0, validRules: [] };
+  }
+  const validRules = rules.filter((rule) => validateFilterRule(rule, payload));
+  const invalidRuleCount = rules.length - validRules.length;
+  if (!validRules.length) {
+    return {
+      includedRecords: payload.records,
+      excludedCount: 0,
+      includedCount: payload.records.length,
+      invalidRuleCount,
+      validRules,
+    };
+  }
+
+  const includedRecords = payload.records.filter((row) => !validRules.every((rule) => rowMatchesFilterRule(row, rule, payload)));
+  return {
+    includedRecords,
+    excludedCount: payload.records.length - includedRecords.length,
+    includedCount: includedRecords.length,
+    invalidRuleCount,
+    validRules,
+  };
+}
+
+function derivePayloadFromSource(payload, rules) {
+  if (!payload) return null;
+  const preview = filterPreviewForRules(payload, rules);
+  return {
+    payload: {
+      ...payload,
+      records: preview.includedRecords,
+    },
+    preview,
+  };
+}
+
+function datasetSummaryText() {
+  if (!sourcePayload || !currentPayload) return "No dashboard loaded yet";
+  const total = sourcePayload.records.length.toLocaleString();
+  const included = currentPayload.records.length.toLocaleString();
+  return included === total ? `${sourcePayload.title} | ${included} rows` : `${sourcePayload.title} | ${included} of ${total} rows`;
+}
+
+function refreshMetaMessage() {
+  if (!sourcePayload || !currentPayload) {
+    clearMeta();
+    return;
+  }
+  const total = sourcePayload.records.length;
+  const included = currentPayload.records.length;
+  const excluded = total - included;
+  const ruleCount = appliedFilterRules.filter((rule) => validateFilterRule(rule, sourcePayload)).length;
+  const base = `${included.toLocaleString()} rows included out of ${total.toLocaleString()} total across ${sourcePayload.columns.length.toLocaleString()} columns.`;
+  if (!ruleCount) {
+    showMeta(base);
+    return;
+  }
+  showMeta(`${base} ${excluded.toLocaleString()} rows excluded by ${ruleCount.toLocaleString()} filter ${ruleCount === 1 ? "rule" : "rules"}.`);
+}
+
+function refreshActivePayload() {
+  if (!sourcePayload) {
+    currentPayload = null;
+    frame.srcdoc = "";
+    setViewerContext("No dashboard loaded yet");
+    refreshMetaMessage();
+    renderStatsToolbar();
+    renderStatsTable();
+    renderCategoricalSummary();
+    renderCorrelationView();
+    return;
+  }
+
+  const derived = derivePayloadFromSource(sourcePayload, appliedFilterRules);
+  currentPayload = derived.payload;
+  frame.srcdoc = buildDashboardHtml(currentPayload);
+  setViewerContext(datasetSummaryText());
+  selectedStatsColumns = selectedStatsColumns.filter((column) => currentPayload.numeric_columns.includes(column));
+  if (!selectedStatsColumns.length) {
+    selectedStatsColumns = currentPayload.numeric_columns.slice(0, Math.min(4, currentPayload.numeric_columns.length));
+  }
+  selectedMatrixColumns = selectedMatrixColumns.filter((column) => currentPayload.numeric_columns.includes(column));
+  if (selectedMatrixColumns.length < 2) {
+    selectedMatrixColumns = currentPayload.numeric_columns.slice(0, Math.min(8, currentPayload.numeric_columns.length));
+  }
+  renderStatsToolbar();
+  renderStatsTable();
+  renderCategoricalSummary();
+  renderCorrelationView();
+  refreshMetaMessage();
+}
+
+function setDraftFilterRule(ruleId, updates) {
+  draftFilterRules = draftFilterRules.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule));
+  renderFilterBuilder();
+}
+
+function removeDraftFilterRule(ruleId) {
+  draftFilterRules = draftFilterRules.filter((rule) => rule.id !== ruleId);
+  renderFilterBuilder();
+}
+
+function renderFilterBuilder() {
+  if (!filterRules || !filterEmpty || !filterImpact || !addFilterRuleButton || !clearFilterRulesButton || !applyFilterRulesButton) return;
+
+  const activeElement = document.activeElement;
+  const focusState = activeElement && activeElement instanceof HTMLElement && activeElement.dataset.ruleId && activeElement.dataset.field
+    ? {
+      ruleId: activeElement.dataset.ruleId,
+      field: activeElement.dataset.field,
+      selectionStart: "selectionStart" in activeElement ? activeElement.selectionStart : null,
+      selectionEnd: "selectionEnd" in activeElement ? activeElement.selectionEnd : null,
+    }
+    : null;
+
+  filterRules.innerHTML = "";
+  if (!sourcePayload) {
+    filterImpact.textContent = "No dataset loaded";
+    filterEmpty.textContent = "Upload a CSV to start defining exclusion rules.";
+    filterEmpty.classList.add("visible");
+    addFilterRuleButton.disabled = true;
+    clearFilterRulesButton.disabled = true;
+    applyFilterRulesButton.disabled = true;
+    return;
+  }
+
+  const preview = filterPreviewForRules(sourcePayload, draftFilterRules);
+  if (draftFilterRules.length) {
+    filterEmpty.classList.remove("visible");
+  } else {
+    filterEmpty.textContent = "No exclusion rules yet. Add a rule to start filtering rows.";
+    filterEmpty.classList.add("visible");
+  }
+
+  filterImpact.textContent = preview.invalidRuleCount
+    ? `Complete ${preview.invalidRuleCount} incomplete ${preview.invalidRuleCount === 1 ? "rule" : "rules"}`
+    : `Preview: keep ${preview.includedCount.toLocaleString()} | exclude ${preview.excludedCount.toLocaleString()}`;
+  addFilterRuleButton.disabled = false;
+  clearFilterRulesButton.disabled = draftFilterRules.length === 0;
+  applyFilterRulesButton.disabled = preview.invalidRuleCount > 0;
+
+  draftFilterRules.forEach((rule, index) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "filter-rule";
+
+    const header = document.createElement("div");
+    header.className = "filter-rule-header";
+
+    const label = document.createElement("div");
+    label.className = "filter-rule-label";
+    label.textContent = `Rule ${index + 1}`;
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "secondary filter-remove";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => removeDraftFilterRule(rule.id));
+
+    header.append(label, removeButton);
+
+    const grid = document.createElement("div");
+    grid.className = "filter-rule-grid";
+
+    const columnField = document.createElement("div");
+    columnField.className = "filter-field";
+    const columnLabel = document.createElement("label");
+    columnLabel.textContent = "Column";
+    const columnSelect = document.createElement("select");
+    columnSelect.dataset.ruleId = String(rule.id);
+    columnSelect.dataset.field = "column";
+    sourcePayload.columns.forEach((column) => {
+      const option = document.createElement("option");
+      option.value = column;
+      option.textContent = column;
+      columnSelect.appendChild(option);
+    });
+    columnSelect.value = sourcePayload.columns.includes(rule.column) ? rule.column : sourcePayload.columns[0];
+    columnSelect.addEventListener("change", () => {
+      setDraftFilterRule(rule.id, {
+        column: columnSelect.value,
+        operator: defaultOperatorForColumn(sourcePayload, columnSelect.value),
+        value: "",
+        value2: "",
+      });
+    });
+    columnField.append(columnLabel, columnSelect);
+
+    const operatorField = document.createElement("div");
+    operatorField.className = "filter-field";
+    const operatorLabel = document.createElement("label");
+    operatorLabel.textContent = "Exclude rows when";
+    const operatorSelect = document.createElement("select");
+    operatorSelect.dataset.ruleId = String(rule.id);
+    operatorSelect.dataset.field = "operator";
+    operatorsForColumn(sourcePayload, rule.column).forEach((operator) => {
+      const option = document.createElement("option");
+      option.value = operator.value;
+      option.textContent = operator.label;
+      operatorSelect.appendChild(option);
+    });
+    if ([...operatorSelect.options].some((option) => option.value === rule.operator)) {
+      operatorSelect.value = rule.operator;
+    }
+    operatorSelect.addEventListener("change", () => {
+      setDraftFilterRule(rule.id, {
+        operator: operatorSelect.value,
+        value: "",
+        value2: "",
+      });
+    });
+    operatorField.append(operatorLabel, operatorSelect);
+
+    grid.append(columnField, operatorField);
+
+    const mode = filterOperatorInputMode(rule.operator);
+    if (mode !== "none") {
+      const valueField = document.createElement("div");
+      valueField.className = `filter-field ${mode === "single" ? "full" : ""}`.trim();
+      const valueLabel = document.createElement("label");
+      valueLabel.textContent = valueLabelForRule(sourcePayload, rule);
+      const valueInput = document.createElement("input");
+      valueInput.dataset.ruleId = String(rule.id);
+      valueInput.dataset.field = "value";
+      valueInput.type = columnTypeForPayload(sourcePayload, rule.column) === "numeric" ? "number" : "text";
+      valueInput.placeholder = previewPlaceholderForRule(sourcePayload, rule);
+      valueInput.value = rule.value;
+      if (rule.operator === "eq" || rule.operator === "neq" || rule.operator === "in_list" || rule.operator === "not_in_list") {
+        valueInput.type = "text";
+      }
+      valueInput.addEventListener("input", () => setDraftFilterRule(rule.id, { value: valueInput.value }));
+      valueField.append(valueLabel, valueInput);
+      grid.appendChild(valueField);
+    }
+
+    if (mode === "range") {
+      const valueField2 = document.createElement("div");
+      valueField2.className = "filter-field";
+      const valueLabel2 = document.createElement("label");
+      valueLabel2.textContent = valueLabelForRule(sourcePayload, rule, true);
+      const valueInput2 = document.createElement("input");
+      valueInput2.dataset.ruleId = String(rule.id);
+      valueInput2.dataset.field = "value2";
+      valueInput2.type = columnTypeForPayload(sourcePayload, rule.column) === "numeric" ? "number" : "text";
+      valueInput2.placeholder = previewPlaceholderForRule(sourcePayload, rule);
+      valueInput2.value = rule.value2;
+      valueInput2.addEventListener("input", () => setDraftFilterRule(rule.id, { value2: valueInput2.value }));
+      valueField2.append(valueLabel2, valueInput2);
+      grid.appendChild(valueField2);
+    }
+
+    const help = document.createElement("div");
+    help.className = "filter-help";
+    const multiValueHint = rule.operator === "eq" || rule.operator === "neq" || rule.operator === "in_list" || rule.operator === "not_in_list"
+      ? " Use commas to enter multiple values."
+      : "";
+    help.textContent = validateFilterRule(rule, sourcePayload)
+      ? `Rows matching this rule ${draftFilterRules.length > 1 ? "and the other rules" : ""} will be excluded from all views.${multiValueHint}`
+      : `Complete this rule to include it in the exclusion preview.${multiValueHint}`;
+
+    wrapper.append(header, grid, help);
+    filterRules.appendChild(wrapper);
+  });
+
+  if (focusState) {
+    const selector = `[data-rule-id="${focusState.ruleId}"][data-field="${focusState.field}"]`;
+    const nextField = filterRules.querySelector(selector);
+    if (nextField instanceof HTMLElement) {
+      nextField.focus();
+      if ("setSelectionRange" in nextField && focusState.selectionStart !== null && focusState.selectionEnd !== null) {
+        try {
+          nextField.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+        } catch (error) {
+          // Ignore controls that do not support caret restoration.
+        }
+      }
+    }
+  }
 }
 
 function meanValue(values) {
@@ -580,12 +1053,179 @@ function linearRegression(xValues, yValues) {
   const intercept = meanY - (slope * meanX);
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
+  const yPredictions = xValues.map((value) => (slope * value) + intercept);
   return {
+    type: "linear",
+    label: "Linear",
     slope,
     intercept,
     xLine: [minX, maxX],
     yLine: [slope * minX + intercept, slope * maxX + intercept],
+    rSquared: coefficientOfDetermination(yValues, yPredictions),
+    equationText: formatLinearEquation(slope, intercept),
   };
+}
+
+function meanOf(values) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function coefficientOfDetermination(observed, predicted) {
+  if (observed.length < 2 || observed.length !== predicted.length) return null;
+  const meanObserved = meanOf(observed);
+  if (meanObserved === null) return null;
+  let totalSumSquares = 0;
+  let residualSumSquares = 0;
+  for (let i = 0; i < observed.length; i += 1) {
+    totalSumSquares += (observed[i] - meanObserved) ** 2;
+    residualSumSquares += (observed[i] - predicted[i]) ** 2;
+  }
+  if (totalSumSquares === 0) return null;
+  return 1 - (residualSumSquares / totalSumSquares);
+}
+
+function solveLinearSystem(matrix, vector) {
+  const size = matrix.length;
+  const augmented = matrix.map((row, index) => [...row, vector[index]]);
+
+  for (let pivotIndex = 0; pivotIndex < size; pivotIndex += 1) {
+    let maxRow = pivotIndex;
+    for (let rowIndex = pivotIndex + 1; rowIndex < size; rowIndex += 1) {
+      if (Math.abs(augmented[rowIndex][pivotIndex]) > Math.abs(augmented[maxRow][pivotIndex])) {
+        maxRow = rowIndex;
+      }
+    }
+    if (Math.abs(augmented[maxRow][pivotIndex]) < 1e-12) {
+      return null;
+    }
+    if (maxRow !== pivotIndex) {
+      [augmented[pivotIndex], augmented[maxRow]] = [augmented[maxRow], augmented[pivotIndex]];
+    }
+
+    const pivot = augmented[pivotIndex][pivotIndex];
+    for (let columnIndex = pivotIndex; columnIndex <= size; columnIndex += 1) {
+      augmented[pivotIndex][columnIndex] /= pivot;
+    }
+
+    for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
+      if (rowIndex === pivotIndex) continue;
+      const factor = augmented[rowIndex][pivotIndex];
+      for (let columnIndex = pivotIndex; columnIndex <= size; columnIndex += 1) {
+        augmented[rowIndex][columnIndex] -= factor * augmented[pivotIndex][columnIndex];
+      }
+    }
+  }
+
+  return augmented.map((row) => row[size]);
+}
+
+function polynomialValue(coefficients, xValue) {
+  return coefficients.reduce((sum, coefficient, index) => sum + (coefficient * (xValue ** index)), 0);
+}
+
+function formatSignedCoefficient(value, isConstant = false) {
+  if (!Number.isFinite(value)) return "N/A";
+  const absoluteValue = Math.abs(value);
+  const formatted = absoluteValue.toFixed(4).replace(/\.?0+$/, "");
+  if (isConstant) return value < 0 ? `-${formatted}` : formatted;
+  return value < 0 ? `- ${formatted}` : formatted;
+}
+
+function formatLinearEquation(slope, intercept) {
+  if (!Number.isFinite(slope) || !Number.isFinite(intercept)) return "No fitted curve";
+  const slopeText = `${slope < 0 ? "-" : ""}${Math.abs(slope).toFixed(4).replace(/\.?0+$/, "")}x`;
+  const interceptText = `${intercept < 0 ? "-" : "+"} ${Math.abs(intercept).toFixed(4).replace(/\.?0+$/, "")}`;
+  return `y = ${slopeText} ${interceptText}`;
+}
+
+function formatPolynomialEquation(coefficients) {
+  const parts = [];
+  for (let index = coefficients.length - 1; index >= 0; index -= 1) {
+    const coefficient = coefficients[index];
+    if (!Number.isFinite(coefficient) || Math.abs(coefficient) < 1e-10) continue;
+    const sign = coefficient < 0 ? "-" : "+";
+    const absValue = Math.abs(coefficient).toFixed(4).replace(/\.?0+$/, "");
+    let term = absValue;
+    if (index >= 1) {
+      term += "x";
+    }
+    if (index >= 2) {
+      term += `^${index}`;
+    }
+    parts.push(parts.length === 0 ? `${coefficient < 0 ? "-" : ""}${term}` : `${sign} ${term}`);
+  }
+  if (!parts.length) return "No fitted curve";
+  return `y = ${parts.join(" ")}`;
+}
+
+function polynomialRegression(xValues, yValues, degree) {
+  const pointCount = xValues.length;
+  if (pointCount <= degree || pointCount !== yValues.length) return null;
+
+  const columnCount = degree + 1;
+  const normalMatrix = Array.from({ length: columnCount }, () => Array(columnCount).fill(0));
+  const normalVector = Array(columnCount).fill(0);
+
+  for (let rowIndex = 0; rowIndex < pointCount; rowIndex += 1) {
+    const xValue = xValues[rowIndex];
+    const yValue = yValues[rowIndex];
+    const powers = Array.from({ length: (degree * 2) + 1 }, (_, power) => xValue ** power);
+
+    for (let i = 0; i < columnCount; i += 1) {
+      normalVector[i] += yValue * powers[i];
+      for (let j = 0; j < columnCount; j += 1) {
+        normalMatrix[i][j] += powers[i + j];
+      }
+    }
+  }
+
+  const coefficients = solveLinearSystem(normalMatrix, normalVector);
+  if (!coefficients) return null;
+
+  const yPredictions = xValues.map((xValue) => polynomialValue(coefficients, xValue));
+  const rSquared = coefficientOfDetermination(yValues, yPredictions);
+  if (rSquared === null || !Number.isFinite(rSquared)) return null;
+
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const pointTotal = 120;
+  const xLine = Array.from({ length: pointTotal }, (_, index) => (
+    minX + ((maxX - minX) * index) / Math.max(1, pointTotal - 1)
+  ));
+  return {
+    type: "nonlinear",
+    label: degree === 2 ? "Quadratic" : "Cubic",
+    degree,
+    coefficients,
+    xLine,
+    yLine: xLine.map((value) => polynomialValue(coefficients, value)),
+    rSquared,
+    equationText: formatPolynomialEquation(coefficients),
+  };
+}
+
+function bestNonlinearRegression(xValues, yValues) {
+  const candidates = [2, 3]
+    .map((degree) => polynomialRegression(xValues, yValues, degree))
+    .filter((candidate) => candidate && Number.isFinite(candidate.rSquared));
+  if (!candidates.length) return null;
+  candidates.sort((left, right) => {
+    if (right.rSquared !== left.rSquared) return right.rSquared - left.rSquared;
+    return left.degree - right.degree;
+  });
+  return candidates[0];
+}
+
+function currentCorrelationFitMode() {
+  return corrFitSelect?.value || "linear";
+}
+
+function selectedTrendlineForPair(aligned) {
+  const mode = currentCorrelationFitMode();
+  if (mode === "none") return null;
+  if (mode === "nonlinear") return bestNonlinearRegression(aligned.xValues, aligned.yValues);
+  return linearRegression(aligned.xValues, aligned.yValues);
 }
 
 function pairKey(left, right) {
@@ -655,20 +1295,18 @@ function metricToneClass(value) {
 
 function renderPairMetrics(summary, regression) {
   if (!corrPairMetrics) return;
-  const slopeValue = regression ? regression.slope : null;
-  const interceptValue = regression ? regression.intercept : null;
   const items = [
-    { label: "Pearson", value: formatCorrelationValue(summary.pearson), raw: summary.pearson, badge: "r" },
-    { label: "Spearman", value: formatCorrelationValue(summary.spearman), raw: summary.spearman, badge: "rs" },
-    { label: "Rows Used", value: summary.n.toLocaleString(), raw: null, badge: "n" },
-    { label: "Slope", value: formatCorrelationValue(slopeValue), raw: slopeValue, badge: "m" },
-    { label: "Intercept", value: formatCorrelationValue(interceptValue), raw: interceptValue, badge: "b" },
+    { label: "Pearson", value: formatCorrelationValue(summary.pearson), raw: summary.pearson, badge: "r", description: CORRELATION_METRIC_EXPLANATIONS.Pearson },
+    { label: "Spearman", value: formatCorrelationValue(summary.spearman), raw: summary.spearman, badge: "rs", description: CORRELATION_METRIC_EXPLANATIONS.Spearman },
+    { label: "Rows Used", value: summary.n.toLocaleString(), raw: null, badge: "n", description: CORRELATION_METRIC_EXPLANATIONS["Rows Used"] },
+    { label: "Curve", value: regression ? regression.label : "None", raw: null, badge: "fit", description: CORRELATION_METRIC_EXPLANATIONS.Curve },
+    { label: "Fit R²", value: formatCorrelationValue(regression?.rSquared ?? null), raw: regression?.rSquared ?? null, badge: "r2", description: CORRELATION_METRIC_EXPLANATIONS["Fit R²"] },
   ];
 
   corrPairMetrics.innerHTML = items.map((item) => `
       <div class="corr-metric-card ${metricToneClass(item.raw)}">
         <div class="corr-metric-badge">${escapeHtml(item.badge)}</div>
-        <div class="corr-metric-label">${escapeHtml(item.label)}</div>
+        <div class="corr-metric-label">${renderInfoTooltipLabel(item.label, item.description, "corr-metric-label-text")}</div>
         <div class="corr-metric-value">${escapeHtml(String(item.value))}</div>
       </div>
     `).join("");
@@ -701,7 +1339,7 @@ function renderPairScatterPlot(xColumn, yColumn, aligned, summary, targetId, reg
     name: "Rows",
   }];
 
-  const resolvedRegression = regression || linearRegression(aligned.xValues, aligned.yValues);
+  const resolvedRegression = regression ?? selectedTrendlineForPair(aligned);
   if (resolvedRegression) {
     traces.push({
       type: "scatter",
@@ -709,18 +1347,18 @@ function renderPairScatterPlot(xColumn, yColumn, aligned, summary, targetId, reg
       x: resolvedRegression.xLine,
       y: resolvedRegression.yLine,
       line: {
-        color: "#f59e0b",
+        color: resolvedRegression.type === "nonlinear" ? "#38bdf8" : "#f59e0b",
         width: 2.5,
       },
-      hovertemplate: "Regression line<extra></extra>",
-      name: "Regression",
+      hovertemplate: `${escapeHtml(resolvedRegression.label)} fit<extra></extra>`,
+      name: `${resolvedRegression.label} Fit`,
     });
   }
 
   target.innerHTML = "";
   const fitText = resolvedRegression
-    ? `y = ${resolvedRegression.slope.toFixed(4)}x + ${resolvedRegression.intercept.toFixed(4)}`
-    : "No regression (insufficient variance)";
+    ? `${resolvedRegression.label} fit | ${resolvedRegression.equationText} | R²: ${formatCorrelationValue(resolvedRegression.rSquared)}`
+    : "No trendline selected";
   const corrText = `Pearson: ${formatCorrelationValue(summary.pearson)} | Spearman: ${formatCorrelationValue(summary.spearman)} | N: ${summary.n.toLocaleString()}`;
 
   let renderPromise;
@@ -815,7 +1453,7 @@ function renderCorrelationPairExplorer() {
     pearson: pearsonCorrelation(aligned.xValues, aligned.yValues),
     spearman: spearmanCorrelation(aligned.xValues, aligned.yValues),
   };
-  const regression = linearRegression(aligned.xValues, aligned.yValues);
+  const regression = selectedTrendlineForPair(aligned);
   renderPairMetrics(summary, regression);
   renderPairScatterPlot(xColumn, yColumn, aligned, summary, "corr-pair-plot", regression);
 }
@@ -905,8 +1543,11 @@ function renderFocusedMatrixScatter() {
     pearson: pearsonCorrelation(aligned.xValues, aligned.yValues),
     spearman: spearmanCorrelation(aligned.xValues, aligned.yValues),
   };
-  const regression = linearRegression(aligned.xValues, aligned.yValues);
-  corrFocusTitle.textContent = `${xColumn} vs ${yColumn} | Pearson: ${formatCorrelationValue(summary.pearson)} | Spearman: ${formatCorrelationValue(summary.spearman)} | Slope: ${formatCorrelationValue(regression?.slope ?? null)} | Intercept: ${formatCorrelationValue(regression?.intercept ?? null)} | N: ${summary.n.toLocaleString()}`;
+  const regression = selectedTrendlineForPair(aligned);
+  const fitCopy = regression
+    ? `${regression.label} fit | R²: ${formatCorrelationValue(regression.rSquared)}`
+    : "No trendline";
+  corrFocusTitle.textContent = `${xColumn} vs ${yColumn} | Pearson: ${formatCorrelationValue(summary.pearson)} | Spearman: ${formatCorrelationValue(summary.spearman)} | ${fitCopy} | N: ${summary.n.toLocaleString()}`;
   renderPairScatterPlot(xColumn, yColumn, aligned, summary, "corr-focus-plot", regression);
 }
 
@@ -1255,9 +1896,14 @@ function renderStatsHeaderCell(label) {
     return `<th>${safeLabel}</th>`;
   }
 
+  return `<th>${renderInfoTooltipLabel(label, description)}</th>`;
+}
+
+function renderInfoTooltipLabel(label, description, className = "stats-term-header") {
+  const safeLabel = escapeHtml(String(label));
   const safeDescription = escapeHtmlAttribute(description);
   const safeAriaLabel = escapeHtmlAttribute(`Info about ${label}`);
-  return `<th><span class="stats-term-header">${safeLabel}<button type="button" class="stats-term-info" aria-label="${safeAriaLabel}" data-tooltip="${safeDescription}">i</button></span></th>`;
+  return `<span class="${escapeHtmlAttribute(className)}">${safeLabel}<button type="button" class="stats-term-info" aria-label="${safeAriaLabel}" data-tooltip="${safeDescription}">i</button></span>`;
 }
 
 function buildDashboardHtml(payload) {
@@ -1268,9 +1914,9 @@ function buildDashboardHtml(payload) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(APP_TITLE)} | ${escapeHtml(payload.title)}</title>
-  <link rel="icon" type="image/png" href="/favicon.png" />
-  <link rel="shortcut icon" href="/favicon.png" />
-  <link rel="apple-touch-icon" href="/favicon.png" />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/favicon.ico" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -2030,17 +2676,21 @@ fileInput.addEventListener("change", () => {
 clearButton.addEventListener("click", () => {
   setLoading(false);
   form.reset();
+  sourcePayload = null;
+  currentPayload = null;
+  draftFilterRules = [];
+  appliedFilterRules = [];
   frame.srcdoc = "";
   setViewerContext("No dashboard loaded yet");
   emptyState.classList.remove("hidden");
   if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
   if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
   if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
-  currentPayload = null;
   selectedStatsColumns = [];
   selectedMatrixColumns = [];
   focusedMatrixPair = null;
   correlationMode = "pair";
+  renderFilterBuilder();
   renderStatsToolbar();
   renderStatsTable();
   renderCategoricalSummary();
@@ -2062,6 +2712,37 @@ if (statsNumericDownloadButton) {
 if (statsCategoricalDownloadButton) {
   statsCategoricalDownloadButton.addEventListener("click", downloadCategoricalSummaryCsv);
 }
+if (addFilterRuleButton) {
+  addFilterRuleButton.addEventListener("click", () => {
+    if (!sourcePayload) return;
+    draftFilterRules = [...draftFilterRules, createFilterRule(sourcePayload)];
+    renderFilterBuilder();
+  });
+}
+if (clearFilterRulesButton) {
+  clearFilterRulesButton.addEventListener("click", () => {
+    draftFilterRules = [];
+    appliedFilterRules = [];
+    if (sourcePayload) {
+      refreshActivePayload();
+    }
+    renderFilterBuilder();
+  });
+}
+if (applyFilterRulesButton) {
+  applyFilterRulesButton.addEventListener("click", () => {
+    if (!sourcePayload) return;
+    const invalidRuleCount = filterPreviewForRules(sourcePayload, draftFilterRules).invalidRuleCount;
+    if (invalidRuleCount) {
+      showError(`Complete ${invalidRuleCount} incomplete filter ${invalidRuleCount === 1 ? "rule" : "rules"} before applying.`);
+      return;
+    }
+    clearError();
+    appliedFilterRules = draftFilterRules.map(cloneFilterRule);
+    refreshActivePayload();
+    renderFilterBuilder();
+  });
+}
 if (corrPairModeButton) {
   corrPairModeButton.addEventListener("click", () => setCorrelationMode("pair"));
 }
@@ -2081,6 +2762,9 @@ if (corrAlphaSlider) {
   };
   corrAlphaSlider.addEventListener("input", onAlphaChange);
   corrAlphaSlider.addEventListener("change", onAlphaChange);
+}
+if (corrFitSelect) {
+  corrFitSelect.addEventListener("change", rerenderCorrelationScatterViews);
 }
 if (corrMatrixMethod) {
   corrMatrixMethod.addEventListener("change", () => {
@@ -2159,24 +2843,27 @@ form.addEventListener("submit", async (event) => {
     const filenameStem = file.name.replace(/\.[^.]+$/, "");
     const title = `${filenameStem} ${DEFAULT_TITLE_SUFFIX}`;
     const payload = buildPayload(rows, title);
+    sourcePayload = payload;
     currentPayload = payload;
+    draftFilterRules = [];
+    appliedFilterRules = [];
     selectedStatsColumns = payload.numeric_columns.slice(0, Math.min(4, payload.numeric_columns.length));
     selectedMatrixColumns = payload.numeric_columns.slice(0, Math.min(8, payload.numeric_columns.length));
     focusedMatrixPair = null;
     correlationMode = "pair";
-    frame.srcdoc = buildDashboardHtml(payload);
-    setViewerContext(payload.title);
+    renderFilterBuilder();
+    refreshActivePayload();
     emptyState.classList.add("hidden");
     if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
     if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
     if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
-    renderStatsToolbar();
-    renderStatsTable();
-    renderCategoricalSummary();
-    renderCorrelationView();
     setOuterView("dashboard");
-    showMeta(`${payload.records.length.toLocaleString()} rows across ${payload.columns.length.toLocaleString()} columns loaded.`);
   } catch (err) {
+    sourcePayload = null;
+    currentPayload = null;
+    draftFilterRules = [];
+    appliedFilterRules = [];
+    renderFilterBuilder();
     setViewerContext("No dashboard loaded yet");
     emptyState.classList.remove("hidden");
     if (emptyStateKicker) emptyStateKicker.textContent = "Upload Error";
@@ -2192,3 +2879,4 @@ renderStatsTable();
 renderCategoricalSummary();
 updateCorrelationAlphaLabel();
 renderCorrelationView();
+renderFilterBuilder();
