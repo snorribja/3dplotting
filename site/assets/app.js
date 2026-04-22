@@ -28,9 +28,18 @@ const correlationTab = document.getElementById("correlation-tab");
 const dashboardPanel = document.getElementById("dashboard-panel");
 const statisticsPanel = document.getElementById("statistics-panel");
 const correlationPanel = document.getElementById("correlation-panel");
-const statsToolbar = document.getElementById("stats-toolbar");
+const statsNumericSelector = document.getElementById("stats-numeric-selector");
+const statsCategoricalSelector = document.getElementById("stats-categorical-selector");
+const statsNumericSearch = document.getElementById("stats-numeric-search");
+const statsCategoricalSearch = document.getElementById("stats-categorical-search");
+const statsNumericSelectionSummary = document.getElementById("stats-numeric-selection-summary");
+const statsCategoricalSelectionSummary = document.getElementById("stats-categorical-selection-summary");
 const statsNumericDownloadButton = document.getElementById("stats-download-numeric-button");
 const statsCategoricalDownloadButton = document.getElementById("stats-download-categorical-button");
+const statsSelectVisibleNumericButton = document.getElementById("stats-select-visible-numeric-button");
+const statsClearNumericButton = document.getElementById("stats-clear-numeric-button");
+const statsSelectVisibleCategoricalButton = document.getElementById("stats-select-visible-categorical-button");
+const statsClearCategoricalButton = document.getElementById("stats-clear-categorical-button");
 const statsSheet = document.getElementById("stats-sheet");
 const categorySheet = document.getElementById("category-sheet");
 const corrPairModeButton = document.getElementById("corr-pair-mode-button");
@@ -63,6 +72,9 @@ let currentPayload = null;
 let draftFilterRules = [];
 let appliedFilterRules = [];
 let selectedStatsColumns = [];
+let selectedCategoricalStatsColumns = [];
+let statsNumericSearchValue = "";
+let statsCategoricalSearchValue = "";
 let activeOuterView = "dashboard";
 let correlationMode = "pair";
 let selectedMatrixColumns = [];
@@ -136,6 +148,64 @@ function setSelectedFile(file) {
   }
   dropzoneTitle.textContent = file.name;
   dropzoneSubtitle.textContent = `${(file.size / 1024).toFixed(1)} KB selected`;
+}
+
+async function loadSelectedCsv() {
+  clearError();
+
+  const file = fileInput.files[0];
+  if (!file) {
+    showError("Choose a CSV file first.");
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".csv")) {
+    showError("Only CSV uploads are supported.");
+    return;
+  }
+
+  setLoading(true, "Loading dashboard...");
+  setViewerContext("Building dashboard...");
+
+  try {
+    const rows = await parseCsvFile(file);
+    const filenameStem = file.name.replace(/\.[^.]+$/, "");
+    const title = `${filenameStem} ${DEFAULT_TITLE_SUFFIX}`;
+    const payload = buildPayload(rows, title);
+    sourcePayload = payload;
+    currentPayload = payload;
+    draftFilterRules = [];
+    appliedFilterRules = [];
+    selectedStatsColumns = payload.numeric_columns.slice(0, Math.min(4, payload.numeric_columns.length));
+    selectedCategoricalStatsColumns = categoricalColumnsForPayload(payload).slice(0, Math.min(6, categoricalColumnsForPayload(payload).length));
+    statsNumericSearchValue = "";
+    statsCategoricalSearchValue = "";
+    if (statsNumericSearch) statsNumericSearch.value = "";
+    if (statsCategoricalSearch) statsCategoricalSearch.value = "";
+    selectedMatrixColumns = payload.numeric_columns.slice(0, Math.min(8, payload.numeric_columns.length));
+    focusedMatrixPair = null;
+    correlationMode = "pair";
+    renderFilterBuilder();
+    refreshActivePayload();
+    emptyState.classList.add("hidden");
+    if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
+    if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
+    if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
+    setOuterView("dashboard");
+  } catch (err) {
+    sourcePayload = null;
+    currentPayload = null;
+    draftFilterRules = [];
+    appliedFilterRules = [];
+    renderFilterBuilder();
+    setViewerContext("No dashboard loaded yet");
+    emptyState.classList.remove("hidden");
+    if (emptyStateKicker) emptyStateKicker.textContent = "Upload Error";
+    if (emptyStateTitle) emptyStateTitle.textContent = "Could not build dashboard from this CSV.";
+    if (emptyStateCopy) emptyStateCopy.textContent = err.message || "Upload failed.";
+    showError(err.message || "Upload failed.");
+  } finally {
+    setLoading(false);
+  }
 }
 
 function showError(message) {
@@ -387,10 +457,11 @@ function refreshActivePayload() {
   currentPayload = derived.payload;
   frame.srcdoc = buildDashboardHtml(currentPayload);
   setViewerContext(datasetSummaryText());
-  selectedStatsColumns = selectedStatsColumns.filter((column) => currentPayload.numeric_columns.includes(column));
-  if (!selectedStatsColumns.length) {
-    selectedStatsColumns = currentPayload.numeric_columns.slice(0, Math.min(4, currentPayload.numeric_columns.length));
-  }
+  selectedStatsColumns = syncSelectedColumns(currentPayload.numeric_columns, selectedStatsColumns);
+  selectedCategoricalStatsColumns = syncSelectedColumns(
+    categoricalColumnsForPayload(currentPayload),
+    selectedCategoricalStatsColumns,
+  );
   selectedMatrixColumns = selectedMatrixColumns.filter((column) => currentPayload.numeric_columns.includes(column));
   if (selectedMatrixColumns.length < 2) {
     selectedMatrixColumns = currentPayload.numeric_columns.slice(0, Math.min(8, currentPayload.numeric_columns.length));
@@ -687,6 +758,34 @@ function categoricalColumnsForPayload(payload) {
   return payload.columns.filter((column) => !payload.numeric_columns.includes(column));
 }
 
+function uniqueOrderedColumns(columns) {
+  return [...new Set(columns)];
+}
+
+function filterColumnsByQuery(columns, query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return columns;
+  return columns.filter((column) => column.toLowerCase().includes(normalized));
+}
+
+function syncSelectedColumns(availableColumns, selectedColumns, defaultCount = 0) {
+  const synced = selectedColumns.filter((column) => availableColumns.includes(column));
+  if (synced.length || defaultCount <= 0) return uniqueOrderedColumns(synced);
+  return availableColumns.slice(0, Math.min(defaultCount, availableColumns.length));
+}
+
+function selectionSummaryText(selectedCount, totalCount, label) {
+  if (!totalCount) return `No ${label} columns available`;
+  if (!selectedCount) return `No ${label} columns selected`;
+  if (selectedCount === totalCount) return `All ${totalCount.toLocaleString()} ${label} columns selected`;
+  return `${selectedCount.toLocaleString()} of ${totalCount.toLocaleString()} ${label} columns selected`;
+}
+
+function updateSelectorSummary(element, selectedCount, totalCount, label) {
+  if (!element) return;
+  element.textContent = selectionSummaryText(selectedCount, totalCount, label);
+}
+
 function categoricalSummaryCellValues(summary) {
   return [
     formatStatValue(summary.count),
@@ -719,7 +818,7 @@ function updateStatsDownloadButtonState() {
   }
   const categoricalColumns = categoricalColumnsForPayload(currentPayload);
   const hasNumeric = selectedStatsColumns.length > 0;
-  const hasCategorical = categoricalColumns.length > 0;
+  const hasCategorical = selectedCategoricalStatsColumns.length > 0 && categoricalColumns.length > 0;
   if (statsNumericDownloadButton) statsNumericDownloadButton.disabled = !hasNumeric;
   if (statsCategoricalDownloadButton) statsCategoricalDownloadButton.disabled = !hasCategorical;
 }
@@ -778,7 +877,8 @@ function downloadNumericStatsCsv() {
 
 function downloadCategoricalSummaryCsv() {
   if (!currentPayload) return;
-  const categoricalColumns = categoricalColumnsForPayload(currentPayload);
+  const categoricalColumns = categoricalColumnsForPayload(currentPayload)
+    .filter((column) => selectedCategoricalStatsColumns.includes(column));
   if (!categoricalColumns.length) return;
 
   const lines = [];
@@ -830,17 +930,82 @@ function categoricalSummaryForColumn(payload, column) {
   return { count: values.length, unique: counts.size, top, frequency };
 }
 
+function createSelectorOption(column, isSelected, onToggle) {
+  const label = document.createElement("label");
+  label.className = "stats-selector-option" + (isSelected ? " active" : "");
+  label.setAttribute("role", "option");
+  label.setAttribute("aria-selected", isSelected ? "true" : "false");
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = isSelected;
+  checkbox.addEventListener("change", onToggle);
+
+  const text = document.createElement("span");
+  text.className = "stats-selector-option-text";
+  text.textContent = column;
+
+  label.append(checkbox, text);
+  return label;
+}
+
+function renderColumnSelector({
+  container,
+  columns,
+  selectedColumns,
+  searchValue,
+  emptyMessage,
+  noMatchMessage,
+  onToggle,
+}) {
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (!columns.length) {
+    container.innerHTML = `<div class="stats-selector-empty">${escapeHtml(emptyMessage)}</div>`;
+    return;
+  }
+
+  const filteredColumns = filterColumnsByQuery(columns, searchValue);
+  if (!filteredColumns.length) {
+    container.innerHTML = `<div class="stats-selector-empty">${escapeHtml(noMatchMessage)}</div>`;
+    return;
+  }
+
+  filteredColumns.forEach((column) => {
+    container.appendChild(
+      createSelectorOption(column, selectedColumns.includes(column), () => onToggle(column)),
+    );
+  });
+}
+
 function renderStatsToolbar() {
-  if (!statsToolbar) return;
-  statsToolbar.innerHTML = "";
   updateStatsDownloadButtonState();
-  if (!currentPayload) return;
-  currentPayload.numeric_columns.forEach((column) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "stats-column-toggle" + (selectedStatsColumns.includes(column) ? " active" : "");
-    button.textContent = column;
-    button.addEventListener("click", () => {
+  const numericColumns = currentPayload?.numeric_columns || [];
+  const categoricalColumns = currentPayload ? categoricalColumnsForPayload(currentPayload) : [];
+  const filteredNumericColumns = filterColumnsByQuery(numericColumns, statsNumericSearchValue);
+  const filteredCategoricalColumns = filterColumnsByQuery(categoricalColumns, statsCategoricalSearchValue);
+
+  updateSelectorSummary(statsNumericSelectionSummary, selectedStatsColumns.length, numericColumns.length, "numeric");
+  updateSelectorSummary(
+    statsCategoricalSelectionSummary,
+    selectedCategoricalStatsColumns.length,
+    categoricalColumns.length,
+    "categorical",
+  );
+  if (statsSelectVisibleNumericButton) statsSelectVisibleNumericButton.disabled = !filteredNumericColumns.length;
+  if (statsClearNumericButton) statsClearNumericButton.disabled = !selectedStatsColumns.length;
+  if (statsSelectVisibleCategoricalButton) statsSelectVisibleCategoricalButton.disabled = !filteredCategoricalColumns.length;
+  if (statsClearCategoricalButton) statsClearCategoricalButton.disabled = !selectedCategoricalStatsColumns.length;
+
+  renderColumnSelector({
+    container: statsNumericSelector,
+    columns: numericColumns,
+    selectedColumns: selectedStatsColumns,
+    searchValue: statsNumericSearchValue,
+    emptyMessage: "Upload a CSV to browse numeric columns.",
+    noMatchMessage: "No numeric columns match the current search.",
+    onToggle: (column) => {
       if (selectedStatsColumns.includes(column)) {
         selectedStatsColumns = selectedStatsColumns.filter((value) => value !== column);
       } else {
@@ -848,8 +1013,25 @@ function renderStatsToolbar() {
       }
       renderStatsToolbar();
       renderStatsTable();
-    });
-    statsToolbar.appendChild(button);
+    },
+  });
+
+  renderColumnSelector({
+    container: statsCategoricalSelector,
+    columns: categoricalColumns,
+    selectedColumns: selectedCategoricalStatsColumns,
+    searchValue: statsCategoricalSearchValue,
+    emptyMessage: "Upload a CSV to browse categorical columns.",
+    noMatchMessage: "No categorical columns match the current search.",
+    onToggle: (column) => {
+      if (selectedCategoricalStatsColumns.includes(column)) {
+        selectedCategoricalStatsColumns = selectedCategoricalStatsColumns.filter((value) => value !== column);
+      } else {
+        selectedCategoricalStatsColumns = [...selectedCategoricalStatsColumns, column];
+      }
+      renderStatsToolbar();
+      renderCategoricalSummary();
+    },
   });
 }
 
@@ -889,6 +1071,7 @@ function renderStatsTable() {
 
 function renderCategoricalSummary() {
   if (!categorySheet) return;
+  updateStatsDownloadButtonState();
   if (!currentPayload) {
     categorySheet.innerHTML = '<div class="stats-empty small">Upload a CSV to see categorical summaries.</div>';
     updateCategoricalSheetHeight(0);
@@ -900,8 +1083,14 @@ function renderCategoricalSummary() {
     updateCategoricalSheetHeight(0);
     return;
   }
+  const selectedColumns = categoricalColumns.filter((column) => selectedCategoricalStatsColumns.includes(column));
+  if (!selectedColumns.length) {
+    categorySheet.innerHTML = '<div class="stats-empty small">Select one or more categorical parameters to show summary statistics.</div>';
+    updateCategoricalSheetHeight(0);
+    return;
+  }
 
-  const summaries = new Map(categoricalColumns.map((column) => [column, categoricalSummaryForColumn(currentPayload, column)]));
+  const summaries = new Map(selectedColumns.map((column) => [column, categoricalSummaryForColumn(currentPayload, column)]));
   const headers = ["Parameter", "Count", "Unique Values", "Top Value", "Top Frequency"];
   let html = '<table class="stats-table"><thead><tr>';
   headers.forEach((header) => {
@@ -909,7 +1098,7 @@ function renderCategoricalSummary() {
   });
   html += "</tr></thead><tbody>";
 
-  categoricalColumns.forEach((column) => {
+  selectedColumns.forEach((column) => {
     html += `<tr><th class="stats-parameter">${escapeHtml(column)}</th>`;
     categoricalSummaryCellValues(summaries.get(column)).forEach((value) => {
       html += `<td>${escapeHtml(String(value))}</td>`;
@@ -919,7 +1108,7 @@ function renderCategoricalSummary() {
 
   html += "</tbody></table>";
   categorySheet.innerHTML = html;
-  updateCategoricalSheetHeight(categoricalColumns.length);
+  updateCategoricalSheetHeight(selectedColumns.length);
 }
 
 function populateSimpleSelect(select, options, selectedValue) {
@@ -2667,10 +2856,14 @@ dropzone.addEventListener("drop", (event) => {
   dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   setSelectedFile(file);
+  void loadSelectedCsv();
 });
 
 fileInput.addEventListener("change", () => {
   setSelectedFile(fileInput.files[0]);
+  if (fileInput.files[0]) {
+    void loadSelectedCsv();
+  }
 });
 
 clearButton.addEventListener("click", () => {
@@ -2687,6 +2880,11 @@ clearButton.addEventListener("click", () => {
   if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
   if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
   selectedStatsColumns = [];
+  selectedCategoricalStatsColumns = [];
+  statsNumericSearchValue = "";
+  statsCategoricalSearchValue = "";
+  if (statsNumericSearch) statsNumericSearch.value = "";
+  if (statsCategoricalSearch) statsCategoricalSearch.value = "";
   selectedMatrixColumns = [];
   focusedMatrixPair = null;
   correlationMode = "pair";
@@ -2711,6 +2909,54 @@ if (statsNumericDownloadButton) {
 }
 if (statsCategoricalDownloadButton) {
   statsCategoricalDownloadButton.addEventListener("click", downloadCategoricalSummaryCsv);
+}
+if (statsNumericSearch) {
+  statsNumericSearch.addEventListener("input", () => {
+    statsNumericSearchValue = statsNumericSearch.value;
+    renderStatsToolbar();
+  });
+}
+if (statsCategoricalSearch) {
+  statsCategoricalSearch.addEventListener("input", () => {
+    statsCategoricalSearchValue = statsCategoricalSearch.value;
+    renderStatsToolbar();
+  });
+}
+if (statsSelectVisibleNumericButton) {
+  statsSelectVisibleNumericButton.addEventListener("click", () => {
+    if (!currentPayload) return;
+    selectedStatsColumns = uniqueOrderedColumns([
+      ...selectedStatsColumns,
+      ...filterColumnsByQuery(currentPayload.numeric_columns, statsNumericSearchValue),
+    ]);
+    renderStatsToolbar();
+    renderStatsTable();
+  });
+}
+if (statsClearNumericButton) {
+  statsClearNumericButton.addEventListener("click", () => {
+    selectedStatsColumns = [];
+    renderStatsToolbar();
+    renderStatsTable();
+  });
+}
+if (statsSelectVisibleCategoricalButton) {
+  statsSelectVisibleCategoricalButton.addEventListener("click", () => {
+    if (!currentPayload) return;
+    selectedCategoricalStatsColumns = uniqueOrderedColumns([
+      ...selectedCategoricalStatsColumns,
+      ...filterColumnsByQuery(categoricalColumnsForPayload(currentPayload), statsCategoricalSearchValue),
+    ]);
+    renderStatsToolbar();
+    renderCategoricalSummary();
+  });
+}
+if (statsClearCategoricalButton) {
+  statsClearCategoricalButton.addEventListener("click", () => {
+    selectedCategoricalStatsColumns = [];
+    renderStatsToolbar();
+    renderCategoricalSummary();
+  });
 }
 if (addFilterRuleButton) {
   addFilterRuleButton.addEventListener("click", () => {
@@ -2809,7 +3055,8 @@ if (corrFocusSaveButton) {
 }
 window.addEventListener("resize", () => {
   if (!currentPayload) return;
-  const categoricalColumns = categoricalColumnsForPayload(currentPayload);
+  const categoricalColumns = categoricalColumnsForPayload(currentPayload)
+    .filter((column) => selectedCategoricalStatsColumns.includes(column));
   updateCategoricalSheetHeight(categoricalColumns.length);
   if (hasPlotly()) {
     ["corr-pair-plot", "corr-matrix-heatmap", "corr-focus-plot"].forEach((id) => {
@@ -2823,56 +3070,7 @@ window.addEventListener("resize", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  clearError();
-
-  const file = fileInput.files[0];
-  if (!file) {
-    showError("Choose a CSV file first.");
-    return;
-  }
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    showError("Only CSV uploads are supported.");
-    return;
-  }
-
-  setLoading(true, "Loading dashboard...");
-  setViewerContext("Building dashboard...");
-
-  try {
-    const rows = await parseCsvFile(file);
-    const filenameStem = file.name.replace(/\.[^.]+$/, "");
-    const title = `${filenameStem} ${DEFAULT_TITLE_SUFFIX}`;
-    const payload = buildPayload(rows, title);
-    sourcePayload = payload;
-    currentPayload = payload;
-    draftFilterRules = [];
-    appliedFilterRules = [];
-    selectedStatsColumns = payload.numeric_columns.slice(0, Math.min(4, payload.numeric_columns.length));
-    selectedMatrixColumns = payload.numeric_columns.slice(0, Math.min(8, payload.numeric_columns.length));
-    focusedMatrixPair = null;
-    correlationMode = "pair";
-    renderFilterBuilder();
-    refreshActivePayload();
-    emptyState.classList.add("hidden");
-    if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
-    if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
-    if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
-    setOuterView("dashboard");
-  } catch (err) {
-    sourcePayload = null;
-    currentPayload = null;
-    draftFilterRules = [];
-    appliedFilterRules = [];
-    renderFilterBuilder();
-    setViewerContext("No dashboard loaded yet");
-    emptyState.classList.remove("hidden");
-    if (emptyStateKicker) emptyStateKicker.textContent = "Upload Error";
-    if (emptyStateTitle) emptyStateTitle.textContent = "Could not build dashboard from this CSV.";
-    if (emptyStateCopy) emptyStateCopy.textContent = err.message || "Upload failed.";
-    showError(err.message || "Upload failed.");
-  } finally {
-    setLoading(false);
-  }
+  await loadSelectedCsv();
 });
 
 renderStatsTable();

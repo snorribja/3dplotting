@@ -35,7 +35,6 @@
         </label>
 
         <div class="actions">
-          <button class="primary" type="submit">Show dashboard</button>
           <button class="secondary" id="clear-button" type="button">Clear</button>
         </div>
       </form>
@@ -93,16 +92,46 @@
         <div class="viewer-panel hidden" id="statistics-panel">
           <div class="stats-stage">
             <div class="stats-section-title">Numeric Parameters</div>
-            <div class="stats-toolbar-row">
-              <div class="stats-toolbar" id="stats-toolbar"></div>
-              <div class="stats-download-group">
-                <button class="stats-download" id="stats-download-numeric-button" type="button">Download Numeric CSV</button>
-                <button class="stats-download" id="stats-download-categorical-button" type="button">Download Categorical CSV</button>
+            <div class="stats-control-panel">
+              <div class="stats-control-header">
+                <div>
+                  <div class="stats-control-title">Choose numeric columns</div>
+                  <div class="stats-control-subtitle" id="stats-numeric-selection-summary">No numeric columns selected</div>
+                </div>
+                <div class="stats-control-actions">
+                  <button class="stats-control-action" id="stats-select-visible-numeric-button" type="button">Select Filtered</button>
+                  <button class="stats-control-action" id="stats-clear-numeric-button" type="button">Clear</button>
+                  <button class="stats-download" id="stats-download-numeric-button" type="button">Download Numeric CSV</button>
+                </div>
               </div>
+              <label class="stats-search-field" for="stats-numeric-search">
+                <span>Search numeric parameters</span>
+                <input id="stats-numeric-search" type="search" placeholder="Filter by column name" autocomplete="off" />
+              </label>
+              <div class="stats-selector-list" id="stats-numeric-selector" role="listbox" aria-label="Numeric parameter selector" aria-multiselectable="true"></div>
             </div>
-            <div class="stats-copy">Toggle parameters to add or remove them from the descriptive statistics sheet.</div>
+            <div class="stats-copy">Search, filter, and select numeric parameters to include in the descriptive statistics table.</div>
             <div class="stats-sheet numeric" id="stats-sheet"></div>
             <div class="stats-section-title">Categorical Summary</div>
+            <div class="stats-control-panel">
+              <div class="stats-control-header">
+                <div>
+                  <div class="stats-control-title">Choose categorical columns</div>
+                  <div class="stats-control-subtitle" id="stats-categorical-selection-summary">No categorical columns selected</div>
+                </div>
+                <div class="stats-control-actions">
+                  <button class="stats-control-action" id="stats-select-visible-categorical-button" type="button">Select Filtered</button>
+                  <button class="stats-control-action" id="stats-clear-categorical-button" type="button">Clear</button>
+                  <button class="stats-download" id="stats-download-categorical-button" type="button">Download Categorical CSV</button>
+                </div>
+              </div>
+              <label class="stats-search-field" for="stats-categorical-search">
+                <span>Search categorical parameters</span>
+                <input id="stats-categorical-search" type="search" placeholder="Filter by column name" autocomplete="off" />
+              </label>
+              <div class="stats-selector-list" id="stats-categorical-selector" role="listbox" aria-label="Categorical parameter selector" aria-multiselectable="true"></div>
+            </div>
+            <div class="stats-copy">Categorical summaries appear only for the selected columns, using the same add/remove workflow as numeric parameters.</div>
             <div class="stats-sheet categorical" id="category-sheet"></div>
           </div>
         </div>
