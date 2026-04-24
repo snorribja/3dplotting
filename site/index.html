@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./assets/styles.css?v=20260424-31" />
+  <link rel="stylesheet" href="./assets/styles.css?v=20260424-34" />
 </head>
 <body>
   <div class="shell">
@@ -43,15 +43,15 @@
         <div class="filter-card-header">
           <div>
             <div class="filter-card-kicker">Data Preparation</div>
-            <h2 class="filter-card-title" id="prep-summary-title">Transformation overview</h2>
+            <h2 class="filter-card-title" id="prep-summary-title">Data prep overview</h2>
           </div>
           <div class="filter-impact" id="prep-impact">No dataset loaded</div>
         </div>
-        <p class="filter-card-copy">Review the prepared dataset at a glance, then open Data Transformation to configure scaling, encoding, subsetting, and exclusion rules before analyzing the results.</p>
+        <p class="filter-card-copy">Review the prepared dataset at a glance, then open Data Prep to configure transformations and run diagnostics before analyzing the results.</p>
         <div class="prep-summary-grid" id="prep-summary-grid"></div>
         <div class="prep-summary-empty visible" id="prep-summary-empty">Upload a CSV to start preparing the dataset.</div>
         <div class="prep-summary-actions">
-          <button class="primary prep-summary-open-button" id="prep-open-button" type="button">Open Data Transformation</button>
+          <button class="primary prep-summary-open-button" id="prep-open-button" type="button">Open Data Prep</button>
         </div>
       </section>
 
@@ -91,20 +91,20 @@
         <div class="viewer-panel hidden" id="transformation-panel">
           <div class="transform-stage">
             <div class="transform-shell">
-              <div class="stats-section-title">Data Transformation</div>
+              <div class="stats-section-title">Data Prep</div>
               <section class="transform-hero stats-control-panel">
                 <div class="transform-hero-copy">
                   <div class="transform-hero-kicker">Workflow</div>
-                  <div class="transform-hero-title">Configure the preparation pipeline and apply it to the analytical views.</div>
-                  <div class="stats-control-subtitle">Draft changes stay isolated here until you confirm them, so this tab can focus purely on setup.</div>
+                  <div class="transform-hero-title">Prepare the dataset, validate edge cases, and then analyze the prepared result.</div>
+                  <div class="stats-control-subtitle">Use transformations to shape the dataset and diagnostics to inspect unusual rows before moving back to the analysis tabs.</div>
                 </div>
-                <div class="transform-workflow" aria-label="Transformation workflow">
-                  <div class="transform-workflow-step active">1. Configure</div>
-                  <div class="transform-workflow-step">2. Apply</div>
+                <div class="transform-mode-switch" aria-label="Data prep mode switch">
+                  <button class="transform-mode-button active" id="prep-transform-mode-button" type="button">Transform</button>
+                  <button class="transform-mode-button" id="prep-diagnostics-mode-button" type="button">Diagnostics</button>
                 </div>
               </section>
 
-              <div class="transform-layout">
+              <div class="transform-layout" id="prep-transform-panel">
                 <aside class="transform-sidebar">
                   <section class="stats-control-panel transform-summary-panel">
                     <div class="stats-control-header">
@@ -263,6 +263,109 @@
                     </div>
                   </section>
                 </main>
+              </div>
+              <div class="transform-layout hidden" id="prep-diagnostics-panel">
+                <div class="outlier-layout transform-diagnostics-layout">
+                  <aside class="outlier-sidebar">
+                    <div class="stats-control-panel">
+                      <div class="stats-control-header">
+                        <div>
+                          <div class="stats-control-title">Outlier Review</div>
+                          <div class="stats-control-subtitle">Inspect potentially unusual rows in the prepared dataset using robust or standard numeric rules.</div>
+                        </div>
+                      </div>
+                      <div class="corr-select-row outlier-control-grid">
+                        <div class="corr-field">
+                          <label for="outlier-method-select">Method</label>
+                          <select id="outlier-method-select">
+                            <option value="iqr">IQR Fences</option>
+                            <option value="zscore">Z-Score</option>
+                            <option value="modified_zscore">Modified Z-Score</option>
+                          </select>
+                        </div>
+                        <div class="corr-field">
+                          <label for="outlier-id-select">Row Label</label>
+                          <select id="outlier-id-select"></select>
+                        </div>
+                      </div>
+                      <div class="corr-alpha-control">
+                        <div class="corr-alpha-header">
+                          <label for="outlier-threshold-slider" id="outlier-threshold-label">Sensitivity Threshold</label>
+                          <div class="corr-alpha-value" id="outlier-threshold-value">1.50</div>
+                        </div>
+                        <input id="outlier-threshold-slider" type="range" min="1" max="5" step="0.1" value="1.5" />
+                        <div class="outlier-threshold-meta" id="outlier-threshold-meta">Common IQR default is 1.5 x IQR.</div>
+                      </div>
+                      <label class="stats-search-field" for="outlier-search">
+                        <span>Search numeric parameters</span>
+                        <input id="outlier-search" type="search" placeholder="Filter by column name" autocomplete="off" />
+                      </label>
+                      <div class="stats-control-actions">
+                        <button class="stats-control-action" id="outlier-select-visible-button" type="button">Select Filtered</button>
+                        <button class="stats-control-action" id="outlier-clear-columns-button" type="button">Clear</button>
+                      </div>
+                      <div class="stats-control-subtitle" id="outlier-selection-summary">No numeric columns selected</div>
+                      <div class="stats-selector-list" id="outlier-column-selector" role="listbox" aria-label="Outlier numeric parameter selector" aria-multiselectable="true"></div>
+                    </div>
+                    <div class="outlier-note" id="outlier-note">Potential outliers are highlighted for review only. They may represent valid rare cases, not necessarily bad data.</div>
+                    <div class="outlier-summary-grid" id="outlier-summary-metrics"></div>
+                  </aside>
+                  <main class="outlier-main">
+                    <div class="stats-control-panel outlier-review-panel">
+                      <div class="stats-control-header">
+                        <div>
+                          <div class="stats-control-title">Review Focus</div>
+                          <div class="stats-control-subtitle">Choose the histogram focus and scatter axes explicitly instead of relying on automatic picks.</div>
+                        </div>
+                      </div>
+                      <div class="corr-select-row outlier-review-grid">
+                        <div class="corr-field">
+                          <label for="outlier-focus-select">Distribution Focus</label>
+                          <select id="outlier-focus-select"></select>
+                        </div>
+                        <div class="corr-field">
+                          <label for="outlier-scatter-x-select">Scatter X</label>
+                          <select id="outlier-scatter-x-select"></select>
+                        </div>
+                        <div class="corr-field">
+                          <label for="outlier-scatter-y-select">Scatter Y</label>
+                          <select id="outlier-scatter-y-select"></select>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="outlier-section-header">
+                      <div class="outlier-section-title">Column Summary</div>
+                      <div class="outlier-section-meta" id="outlier-column-summary"></div>
+                    </div>
+                    <div class="stats-sheet outlier-sheet" id="outlier-column-sheet"></div>
+                    <div class="outlier-section-header">
+                      <div class="outlier-section-title">Ranked Rows</div>
+                      <div class="outlier-section-meta" id="outlier-row-summary"></div>
+                    </div>
+                    <div class="stats-sheet outlier-sheet" id="outlier-row-sheet"></div>
+                    <div class="outlier-plot-grid">
+                      <div class="outlier-plot-card">
+                        <div class="outlier-section-header">
+                          <div class="outlier-section-title">Scatter Review</div>
+                          <div class="corr-plot-tools">
+                            <button class="corr-small-button" id="outlier-scatter-reset-button" type="button">Reset Zoom</button>
+                            <button class="corr-small-button" id="outlier-scatter-save-button" type="button">Save Plot</button>
+                          </div>
+                        </div>
+                        <div class="corr-plot outlier-plot" id="outlier-scatter-plot"></div>
+                      </div>
+                      <div class="outlier-plot-card">
+                        <div class="outlier-section-header">
+                          <div class="outlier-section-title">Distribution Context</div>
+                          <div class="corr-plot-tools">
+                            <button class="corr-small-button" id="outlier-hist-save-button" type="button">Save Plot</button>
+                          </div>
+                        </div>
+                        <div class="corr-plot outlier-plot" id="outlier-histogram-plot"></div>
+                      </div>
+                    </div>
+                  </main>
+                </div>
               </div>
             </div>
           </div>
@@ -483,6 +586,6 @@
 
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="./assets/app.js?v=20260424-32"></script>
+  <script src="./assets/app.js?v=20260424-36"></script>
 </body>
 </html>

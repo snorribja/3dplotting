@@ -2,6 +2,10 @@ const APP_TITLE = "CSV 3D Explorer";
 const DEFAULT_TITLE_SUFFIX = "3D Interactive Dashboard";
 const MAX_CATEGORICAL_COLOR_LEVELS = 30;
 const NONE_OPTION = "__none__";
+const PERSISTENCE_DB_NAME = "statzooka-app-state";
+const PERSISTENCE_STORE_NAME = "app-state";
+const PERSISTENCE_RECORD_ID = "latest";
+const PERSISTENCE_VERSION = 1;
 
 const form = document.getElementById("upload-form");
 const fileInput = document.getElementById("csv-file");
@@ -31,6 +35,10 @@ const transformationPanel = document.getElementById("transformation-panel");
 const statisticsPanel = document.getElementById("statistics-panel");
 const distributionPanel = document.getElementById("distribution-panel");
 const correlationPanel = document.getElementById("correlation-panel");
+const prepTransformModeButton = document.getElementById("prep-transform-mode-button");
+const prepDiagnosticsModeButton = document.getElementById("prep-diagnostics-mode-button");
+const prepTransformPanel = document.getElementById("prep-transform-panel");
+const prepDiagnosticsPanel = document.getElementById("prep-diagnostics-panel");
 const transformSummarySubtitle = document.getElementById("transform-summary-subtitle");
 const transformImpactGrid = document.getElementById("transform-impact-grid");
 const transformApplyNote = document.getElementById("transform-apply-note");
@@ -84,6 +92,31 @@ const distViolinSaveButton = document.getElementById("dist-violin-save-button");
 const distPlot = document.getElementById("dist-plot");
 const distBoxPlot = document.getElementById("dist-box-plot");
 const distViolinPlot = document.getElementById("dist-violin-plot");
+const outlierMethodSelect = document.getElementById("outlier-method-select");
+const outlierIdSelect = document.getElementById("outlier-id-select");
+const outlierThresholdSlider = document.getElementById("outlier-threshold-slider");
+const outlierThresholdLabel = document.getElementById("outlier-threshold-label");
+const outlierThresholdValue = document.getElementById("outlier-threshold-value");
+const outlierThresholdMeta = document.getElementById("outlier-threshold-meta");
+const outlierSearch = document.getElementById("outlier-search");
+const outlierSelectionSummary = document.getElementById("outlier-selection-summary");
+const outlierColumnSelector = document.getElementById("outlier-column-selector");
+const outlierSelectVisibleButton = document.getElementById("outlier-select-visible-button");
+const outlierClearColumnsButton = document.getElementById("outlier-clear-columns-button");
+const outlierNote = document.getElementById("outlier-note");
+const outlierSummaryMetrics = document.getElementById("outlier-summary-metrics");
+const outlierFocusSelect = document.getElementById("outlier-focus-select");
+const outlierScatterXSelect = document.getElementById("outlier-scatter-x-select");
+const outlierScatterYSelect = document.getElementById("outlier-scatter-y-select");
+const outlierColumnSummary = document.getElementById("outlier-column-summary");
+const outlierRowSummary = document.getElementById("outlier-row-summary");
+const outlierColumnSheet = document.getElementById("outlier-column-sheet");
+const outlierRowSheet = document.getElementById("outlier-row-sheet");
+const outlierScatterPlot = document.getElementById("outlier-scatter-plot");
+const outlierHistogramPlot = document.getElementById("outlier-histogram-plot");
+const outlierScatterResetButton = document.getElementById("outlier-scatter-reset-button");
+const outlierScatterSaveButton = document.getElementById("outlier-scatter-save-button");
+const outlierHistSaveButton = document.getElementById("outlier-hist-save-button");
 const corrPairModeButton = document.getElementById("corr-pair-mode-button");
 const corrMatrixModeButton = document.getElementById("corr-matrix-mode-button");
 const corrPairPanel = document.getElementById("corr-pair-panel");
@@ -118,12 +151,22 @@ let selectedCategoricalStatsColumns = [];
 let statsNumericSearchValue = "";
 let statsCategoricalSearchValue = "";
 let activeOuterView = "dashboard";
+let activePrepView = "transform";
 let distributionColumn = null;
 let distributionSplitColumn = NONE_OPTION;
 let distributionViewMode = "histogram";
 let distributionOverlayMode = "kde";
 let distributionBinCount = 24;
 let distributionNormalization = "density";
+let outlierMethod = "iqr";
+let outlierThreshold = 1.5;
+let outlierSelectedColumns = [];
+let outlierSearchValue = "";
+let outlierIdColumn = NONE_OPTION;
+let outlierFocusColumn = null;
+let outlierScatterXColumn = null;
+let outlierScatterYColumn = null;
+let outlierSelectedRowIndex = null;
 let correlationMode = "pair";
 let selectedMatrixColumns = [];
 let focusedMatrixPair = null;
@@ -131,12 +174,42 @@ let currentMatrixPairLookup = new Map();
 let nextFilterRuleId = 1;
 let responsivePlotResizeFrame = 0;
 let responsivePlotObserver = null;
+let persistenceWriteTimer = 0;
+let persistenceRestorePromise = null;
+let dashboardViewState = null;
 const responsivePlotObservedSizes = new WeakMap();
 const SCALING_OPTIONS = [
   { value: "none", label: "No scaling" },
   { value: "standardize", label: "Standardize (z-score)" },
   { value: "normalize", label: "Normalize (min-max)" },
 ];
+const OUTLIER_ROW_TABLE_LIMIT = 100;
+const OUTLIER_METHOD_CONFIG = {
+  iqr: {
+    label: "IQR Multiplier",
+    defaultThreshold: 1.5,
+    min: 0.5,
+    max: 4,
+    step: 0.1,
+    note: "Flags values outside Q1 - k x IQR or Q3 + k x IQR. 1.5 is the common default.",
+  },
+  zscore: {
+    label: "Absolute Z-Score Cutoff",
+    defaultThreshold: 3,
+    min: 2,
+    max: 5,
+    step: 0.1,
+    note: "Flags values with absolute z-score above the cutoff. 3.0 is a common default.",
+  },
+  modified_zscore: {
+    label: "Modified Z-Score Cutoff",
+    defaultThreshold: 3.5,
+    min: 2.5,
+    max: 6,
+    step: 0.1,
+    note: "Uses the median and MAD, so it is more robust to skewed data. 3.5 is a common default.",
+  },
+};
 const FILTER_OPERATORS = {
   numeric: [
     { value: "eq", label: "is equal to" },
@@ -200,6 +273,347 @@ const DISTRIBUTION_LEGEND_BORDER = "rgba(143, 61, 255, 0.34)";
 const DISTRIBUTION_FONT_COLOR = "#eef2ff";
 const DISTRIBUTION_SECONDARY_FONT_COLOR = "#c7d2e5";
 
+function storageAvailable(area) {
+  try {
+    const key = "__statzooka_test__";
+    area.setItem(key, "1");
+    area.removeItem(key);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+const hasLocalStorage = storageAvailable(window.localStorage);
+
+function openPersistenceDb() {
+  if (!("indexedDB" in window)) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(PERSISTENCE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PERSISTENCE_STORE_NAME)) {
+        db.createObjectStore(PERSISTENCE_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open app storage."));
+  });
+}
+
+async function readPersistedSnapshot() {
+  if ("indexedDB" in window) {
+    try {
+      const db = await openPersistenceDb();
+      if (db) {
+        const result = await new Promise((resolve, reject) => {
+          const transaction = db.transaction(PERSISTENCE_STORE_NAME, "readonly");
+          const store = transaction.objectStore(PERSISTENCE_STORE_NAME);
+          const request = store.get(PERSISTENCE_RECORD_ID);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error || new Error("Could not read app state."));
+        });
+        db.close();
+        if (result) return result.snapshot || null;
+      }
+    } catch (error) {
+      // Fall back to localStorage when IndexedDB is unavailable.
+    }
+  }
+  if (!hasLocalStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(PERSISTENCE_DB_NAME);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function writePersistedSnapshot(snapshot) {
+  if ("indexedDB" in window) {
+    try {
+      const db = await openPersistenceDb();
+      if (db) {
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction(PERSISTENCE_STORE_NAME, "readwrite");
+          const store = transaction.objectStore(PERSISTENCE_STORE_NAME);
+          const request = store.put({ id: PERSISTENCE_RECORD_ID, snapshot });
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error || new Error("Could not save app state."));
+        });
+        db.close();
+        return;
+      }
+    } catch (error) {
+      // Fall back to localStorage when IndexedDB writes fail.
+    }
+  }
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.setItem(PERSISTENCE_DB_NAME, JSON.stringify(snapshot));
+  } catch (error) {
+    // Ignore quota errors rather than breaking the current session.
+  }
+}
+
+async function clearPersistedSnapshot() {
+  if ("indexedDB" in window) {
+    try {
+      const db = await openPersistenceDb();
+      if (db) {
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction(PERSISTENCE_STORE_NAME, "readwrite");
+          const store = transaction.objectStore(PERSISTENCE_STORE_NAME);
+          const request = store.delete(PERSISTENCE_RECORD_ID);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error || new Error("Could not clear app state."));
+        });
+        db.close();
+      }
+    } catch (error) {
+      // Continue to localStorage cleanup below.
+    }
+  }
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.removeItem(PERSISTENCE_DB_NAME);
+  } catch (error) {
+    // Ignore storage cleanup errors.
+  }
+}
+
+function cloneDashboardViewState(state = null) {
+  return state ? { ...state } : null;
+}
+
+function currentCorrelationSelectionState() {
+  return {
+    mode: correlationMode === "matrix" ? "matrix" : "pair",
+    xColumn: corrXSelect?.value || null,
+    yColumn: corrYSelect?.value || null,
+    alpha: corrAlphaSlider ? Number(corrAlphaSlider.value) : null,
+    fit: corrFitSelect?.value || "linear",
+    matrixMethod: corrMatrixMethod?.value || "pearson",
+    selectedMatrixColumns: [...selectedMatrixColumns],
+    focusedMatrixPair: focusedMatrixPair ? { ...focusedMatrixPair } : null,
+  };
+}
+
+function buildPersistenceSnapshot() {
+  if (!sourcePayload) return null;
+  return {
+    version: PERSISTENCE_VERSION,
+    dataset: {
+      sourcePayload,
+      fileName: fileInput.files[0]?.name || dropzoneTitle?.textContent || "dataset.csv",
+      fileSize: fileInput.files[0]?.size || null,
+    },
+    view: {
+      activeOuterView,
+      activePrepView,
+      draftTransformConfig: cloneTransformConfig(draftTransformConfig || defaultTransformConfig()),
+      appliedTransformConfig: cloneTransformConfig(appliedTransformConfig || defaultTransformConfig()),
+      selectedStatsColumns: [...selectedStatsColumns],
+      selectedCategoricalStatsColumns: [...selectedCategoricalStatsColumns],
+      statsNumericSearchValue,
+      statsCategoricalSearchValue,
+      distributionColumn,
+      distributionSplitColumn,
+      distributionViewMode,
+      distributionOverlayMode,
+      distributionBinCount,
+      distributionNormalization,
+      outlierMethod,
+      outlierThreshold,
+      outlierSelectedColumns: [...outlierSelectedColumns],
+      outlierSearchValue,
+      outlierIdColumn,
+      outlierFocusColumn,
+      outlierScatterXColumn,
+      outlierScatterYColumn,
+      outlierSelectedRowIndex,
+      correlation: currentCorrelationSelectionState(),
+      nextFilterRuleId,
+      dashboardViewState: cloneDashboardViewState(dashboardViewState),
+    },
+  };
+}
+
+function persistAppStateSoon() {
+  if (persistenceWriteTimer) {
+    clearTimeout(persistenceWriteTimer);
+  }
+  persistenceWriteTimer = window.setTimeout(async () => {
+    persistenceWriteTimer = 0;
+    const snapshot = buildPersistenceSnapshot();
+    if (!snapshot) return;
+    await writePersistedSnapshot(snapshot);
+  }, 120);
+}
+
+function applyPersistedFileMeta(fileName, fileSize = null) {
+  if (!fileName) {
+    setSelectedFile(null);
+    return;
+  }
+  dropzoneTitle.textContent = fileName;
+  if (Number.isFinite(fileSize)) {
+    dropzoneSubtitle.textContent = `${(fileSize / 1024).toFixed(1)} KB selected`;
+  } else {
+    dropzoneSubtitle.textContent = "Restored from your previous session.";
+  }
+}
+
+function resetApplicationState() {
+  setLoading(false);
+  form.reset();
+  sourcePayload = null;
+  currentPayload = null;
+  draftTransformConfig = null;
+  appliedTransformConfig = null;
+  dashboardViewState = null;
+  frame.srcdoc = "";
+  setViewerContext("No dashboard loaded yet");
+  emptyState.classList.remove("hidden");
+  if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
+  if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
+  if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
+  selectedStatsColumns = [];
+  selectedCategoricalStatsColumns = [];
+  statsNumericSearchValue = "";
+  statsCategoricalSearchValue = "";
+  distributionColumn = null;
+  distributionSplitColumn = NONE_OPTION;
+  distributionViewMode = "histogram";
+  distributionOverlayMode = "kde";
+  distributionBinCount = 24;
+  distributionNormalization = "density";
+  activePrepView = "transform";
+  outlierMethod = "iqr";
+  outlierThreshold = outlierMethodConfig(outlierMethod).defaultThreshold;
+  outlierSelectedColumns = [];
+  outlierSearchValue = "";
+  outlierIdColumn = NONE_OPTION;
+  outlierFocusColumn = null;
+  outlierScatterXColumn = null;
+  outlierScatterYColumn = null;
+  outlierSelectedRowIndex = null;
+  if (statsNumericSearch) statsNumericSearch.value = "";
+  if (statsCategoricalSearch) statsCategoricalSearch.value = "";
+  if (distBinSlider) distBinSlider.value = String(distributionBinCount);
+  if (outlierSearch) outlierSearch.value = "";
+  if (outlierThresholdSlider) outlierThresholdSlider.value = String(outlierThreshold);
+  if (outlierMethodSelect) outlierMethodSelect.value = outlierMethod;
+  if (corrAlphaSlider) corrAlphaSlider.value = "0.78";
+  if (corrFitSelect) corrFitSelect.value = "linear";
+  if (corrMatrixMethod) corrMatrixMethod.value = "pearson";
+  selectedMatrixColumns = [];
+  focusedMatrixPair = null;
+  correlationMode = "pair";
+  renderTransformationView();
+  renderStatsToolbar();
+  renderStatsTable();
+  renderCategoricalSummary();
+  renderDistributionView();
+  renderOutlierView();
+  updateCorrelationAlphaLabel();
+  renderCorrelationView();
+  setOuterView("dashboard");
+  setSelectedFile(null);
+  clearMeta();
+  clearError();
+}
+
+function restoreCorrelationState(snapshot = {}) {
+  correlationMode = snapshot.mode === "matrix" ? "matrix" : "pair";
+  if (corrAlphaSlider && Number.isFinite(snapshot.alpha)) {
+    corrAlphaSlider.value = String(Math.max(0.15, Math.min(1, snapshot.alpha)));
+  }
+  if (corrFitSelect && typeof snapshot.fit === "string") {
+    corrFitSelect.value = snapshot.fit;
+  }
+  if (corrMatrixMethod && typeof snapshot.matrixMethod === "string") {
+    corrMatrixMethod.value = snapshot.matrixMethod;
+  }
+  selectedMatrixColumns = Array.isArray(snapshot.selectedMatrixColumns) ? [...snapshot.selectedMatrixColumns] : [];
+  focusedMatrixPair = snapshot.focusedMatrixPair && snapshot.focusedMatrixPair.xColumn && snapshot.focusedMatrixPair.yColumn
+    ? { xColumn: snapshot.focusedMatrixPair.xColumn, yColumn: snapshot.focusedMatrixPair.yColumn }
+    : null;
+}
+
+function restorePersistedState(snapshot) {
+  if (!snapshot?.dataset?.sourcePayload) return false;
+  const persistedPayload = snapshot.dataset.sourcePayload;
+  if (!persistedPayload || !Array.isArray(persistedPayload.records) || !Array.isArray(persistedPayload.columns)) {
+    return false;
+  }
+
+  sourcePayload = persistedPayload;
+  currentPayload = persistedPayload;
+  dashboardViewState = cloneDashboardViewState(snapshot.view?.dashboardViewState);
+  draftTransformConfig = cloneTransformConfig(snapshot.view?.draftTransformConfig || defaultTransformConfig());
+  appliedTransformConfig = cloneTransformConfig(snapshot.view?.appliedTransformConfig || defaultTransformConfig());
+  selectedStatsColumns = Array.isArray(snapshot.view?.selectedStatsColumns) ? [...snapshot.view.selectedStatsColumns] : [];
+  selectedCategoricalStatsColumns = Array.isArray(snapshot.view?.selectedCategoricalStatsColumns) ? [...snapshot.view.selectedCategoricalStatsColumns] : [];
+  statsNumericSearchValue = typeof snapshot.view?.statsNumericSearchValue === "string" ? snapshot.view.statsNumericSearchValue : "";
+  statsCategoricalSearchValue = typeof snapshot.view?.statsCategoricalSearchValue === "string" ? snapshot.view.statsCategoricalSearchValue : "";
+  distributionColumn = snapshot.view?.distributionColumn || null;
+  distributionSplitColumn = snapshot.view?.distributionSplitColumn || NONE_OPTION;
+  distributionViewMode = snapshot.view?.distributionViewMode || "histogram";
+  distributionOverlayMode = snapshot.view?.distributionOverlayMode || "kde";
+  distributionBinCount = Math.max(8, Math.min(80, Number(snapshot.view?.distributionBinCount) || 24));
+  distributionNormalization = snapshot.view?.distributionNormalization || "density";
+  activePrepView = snapshot.view?.activePrepView === "diagnostics" ? "diagnostics" : "transform";
+  outlierMethod = snapshot.view?.outlierMethod || "iqr";
+  outlierThreshold = normalizeThresholdForMethod(outlierMethod, Number(snapshot.view?.outlierThreshold));
+  outlierSelectedColumns = Array.isArray(snapshot.view?.outlierSelectedColumns) ? [...snapshot.view.outlierSelectedColumns] : [];
+  outlierSearchValue = typeof snapshot.view?.outlierSearchValue === "string" ? snapshot.view.outlierSearchValue : "";
+  outlierIdColumn = snapshot.view?.outlierIdColumn || NONE_OPTION;
+  outlierFocusColumn = snapshot.view?.outlierFocusColumn || null;
+  outlierScatterXColumn = snapshot.view?.outlierScatterXColumn || null;
+  outlierScatterYColumn = snapshot.view?.outlierScatterYColumn || null;
+  outlierSelectedRowIndex = Number.isInteger(snapshot.view?.outlierSelectedRowIndex)
+    ? snapshot.view.outlierSelectedRowIndex
+    : null;
+  nextFilterRuleId = Math.max(1, Number(snapshot.view?.nextFilterRuleId) || 1);
+  restoreCorrelationState(snapshot.view?.correlation || {});
+  if (statsNumericSearch) statsNumericSearch.value = statsNumericSearchValue;
+  if (statsCategoricalSearch) statsCategoricalSearch.value = statsCategoricalSearchValue;
+  if (distBinSlider) distBinSlider.value = String(distributionBinCount);
+  if (outlierSearch) outlierSearch.value = outlierSearchValue;
+  if (outlierThresholdSlider) outlierThresholdSlider.value = String(outlierThreshold);
+  if (outlierMethodSelect) outlierMethodSelect.value = outlierMethod;
+  applyPersistedFileMeta(snapshot.dataset.fileName, snapshot.dataset.fileSize);
+  emptyState.classList.add("hidden");
+  refreshActivePayload();
+  updateCorrelationAlphaLabel();
+  if (snapshot.view?.activeOuterView === "outlier" || snapshot.view?.activeOuterView === "diagnostics") {
+    activePrepView = "diagnostics";
+  }
+  const restoredView = (snapshot.view?.activeOuterView === "outlier" || snapshot.view?.activeOuterView === "diagnostics")
+    ? "transformation"
+    : (snapshot.view?.activeOuterView || "dashboard");
+  setOuterView(restoredView);
+  if (corrXSelect && snapshot.view?.correlation?.xColumn) {
+    corrXSelect.value = snapshot.view.correlation.xColumn;
+  }
+  if (corrYSelect && snapshot.view?.correlation?.yColumn) {
+    corrYSelect.value = snapshot.view.correlation.yColumn;
+  }
+  renderCorrelationView();
+  return true;
+}
+
+async function restorePersistedStateOnLoad() {
+  const snapshot = await readPersistedSnapshot();
+  if (!snapshot) return;
+  const restored = restorePersistedState(snapshot);
+  if (!restored) {
+    await clearPersistedSnapshot();
+  }
+}
+
 function setViewerContext(text) {
   if (viewerContext) {
     viewerContext.textContent = text;
@@ -247,6 +661,7 @@ async function loadSelectedCsv() {
     const payload = buildPayload(rows, title);
     sourcePayload = payload;
     currentPayload = payload;
+    dashboardViewState = null;
     draftTransformConfig = defaultTransformConfig();
     appliedTransformConfig = defaultTransformConfig();
     selectedStatsColumns = payload.numeric_columns.slice(0, Math.min(4, payload.numeric_columns.length));
@@ -259,9 +674,24 @@ async function loadSelectedCsv() {
     distributionOverlayMode = "kde";
     distributionBinCount = 24;
     distributionNormalization = "density";
+    activePrepView = "transform";
+    outlierMethod = "iqr";
+    outlierThreshold = outlierMethodConfig(outlierMethod).defaultThreshold;
+    outlierSelectedColumns = payload.numeric_columns.slice(0, Math.min(3, payload.numeric_columns.length));
+    outlierSearchValue = "";
+    outlierIdColumn = payload.defaults.hover_id || NONE_OPTION;
+    outlierFocusColumn = outlierSelectedColumns[0] || payload.numeric_columns[0] || null;
+    outlierScatterXColumn = outlierSelectedColumns[0] || payload.numeric_columns[0] || null;
+    outlierScatterYColumn = outlierSelectedColumns[1]
+      || payload.numeric_columns.find((column) => column !== outlierScatterXColumn)
+      || null;
+    outlierSelectedRowIndex = null;
     if (statsNumericSearch) statsNumericSearch.value = "";
     if (statsCategoricalSearch) statsCategoricalSearch.value = "";
     if (distBinSlider) distBinSlider.value = String(distributionBinCount);
+    if (outlierSearch) outlierSearch.value = "";
+    if (outlierThresholdSlider) outlierThresholdSlider.value = String(outlierThreshold);
+    if (outlierMethodSelect) outlierMethodSelect.value = outlierMethod;
     selectedMatrixColumns = payload.numeric_columns.slice(0, Math.min(8, payload.numeric_columns.length));
     focusedMatrixPair = null;
     correlationMode = "pair";
@@ -272,6 +702,7 @@ async function loadSelectedCsv() {
     if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
     if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
     setOuterView("dashboard");
+    persistAppStateSoon();
   } catch (err) {
     sourcePayload = null;
     currentPayload = null;
@@ -529,12 +960,14 @@ function setTransformRule(group, ruleId, updates) {
   if (!draftTransformConfig) return;
   draftTransformConfig[group] = draftTransformConfig[group].map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule));
   renderTransformationView();
+  persistAppStateSoon();
 }
 
 function removeTransformRule(group, ruleId) {
   if (!draftTransformConfig) return;
   draftTransformConfig[group] = draftTransformConfig[group].filter((rule) => rule.id !== ruleId);
   renderTransformationView();
+  persistAppStateSoon();
 }
 
 function validRuleCount(payload, rules) {
@@ -551,6 +984,7 @@ function toggleTransformColumn(section, column) {
   }
   draftTransformConfig[section].columns = [...current];
   renderTransformationView();
+  persistAppStateSoon();
 }
 
 function scalingSummaryText(config = appliedTransformConfig, payload = currentPayload || sourcePayload) {
@@ -801,6 +1235,14 @@ function updatePreparedSelectionState() {
   if (!distributionSplitColumnsForPayload(currentPayload).includes(distributionSplitColumn)) {
     distributionSplitColumn = NONE_OPTION;
   }
+  outlierSelectedColumns = syncSelectedColumns(currentPayload.numeric_columns, outlierSelectedColumns, 3);
+  if (!currentPayload.columns.includes(outlierIdColumn)) {
+    outlierIdColumn = currentPayload.defaults.hover_id || NONE_OPTION;
+  }
+  syncOutlierReviewState(
+    currentPayload,
+    currentPayload.numeric_columns.filter((column) => outlierSelectedColumns.includes(column)),
+  );
   selectedMatrixColumns = selectedMatrixColumns.filter((column) => currentPayload.numeric_columns.includes(column));
   if (selectedMatrixColumns.length < 2) {
     selectedMatrixColumns = currentPayload.numeric_columns.slice(0, Math.min(8, currentPayload.numeric_columns.length));
@@ -818,13 +1260,14 @@ function refreshActivePayload() {
     renderStatsTable();
     renderCategoricalSummary();
     renderDistributionView();
+    renderOutlierView();
     renderCorrelationView();
     return;
   }
 
   const derived = derivePreparedPayload(sourcePayload, appliedTransformConfig || defaultTransformConfig());
   currentPayload = derived.payload;
-  frame.srcdoc = buildDashboardHtml(currentPayload);
+  frame.srcdoc = buildDashboardHtml(currentPayload, dashboardViewState);
   setViewerContext(datasetSummaryText());
   updatePreparedSelectionState();
   renderTransformationView();
@@ -832,6 +1275,7 @@ function refreshActivePayload() {
   renderStatsTable();
   renderCategoricalSummary();
   renderDistributionView();
+  renderOutlierView();
   renderCorrelationView();
   refreshMetaMessage(derived.preview);
 }
@@ -1095,7 +1539,7 @@ function renderPrepSummary(preview) {
   prepImpact.textContent = `${currentPayload.records.length.toLocaleString()} rows | ${currentPayload.columns.length.toLocaleString()} cols`;
   const appliedPreview = preview || derivePreparedPayload(sourcePayload, appliedTransformConfig)?.preview;
   const items = [
-    { label: "Pipeline status", value: activeOuterView === "transformation" ? "Open for editing" : "Applied to analysis views" },
+    { label: "Prep workspace", value: activeOuterView === "transformation" ? (activePrepView === "diagnostics" ? "Diagnostics open" : "Transform open") : "Closed" },
     { label: "Applied steps", value: [
       scalingSummaryText(appliedTransformConfig, sourcePayload),
       appliedTransformConfig.log.columns.length ? `${appliedTransformConfig.log.columns.length.toLocaleString()} log transform${appliedTransformConfig.log.columns.length === 1 ? "" : "s"}` : "No log transforms",
@@ -1114,7 +1558,35 @@ function renderPrepSummary(preview) {
   `).join("");
 }
 
+function renderPrepModeSwitch() {
+  if (prepTransformModeButton) {
+    prepTransformModeButton.classList.toggle("active", activePrepView === "transform");
+  }
+  if (prepDiagnosticsModeButton) {
+    prepDiagnosticsModeButton.classList.toggle("active", activePrepView === "diagnostics");
+  }
+  if (prepTransformPanel) {
+    prepTransformPanel.classList.toggle("hidden", activePrepView !== "transform");
+  }
+  if (prepDiagnosticsPanel) {
+    prepDiagnosticsPanel.classList.toggle("hidden", activePrepView !== "diagnostics");
+  }
+}
+
+function setPrepView(view) {
+  activePrepView = view === "diagnostics" ? "diagnostics" : "transform";
+  renderPrepModeSwitch();
+  if (activePrepView === "diagnostics") {
+    renderOutlierView();
+    setTimeout(() => resizeOutlierPlots(), 0);
+  } else {
+    renderTransformationView();
+  }
+  persistAppStateSoon();
+}
+
 function renderTransformationView() {
+  renderPrepModeSwitch();
   renderScaleModeSelector();
   if (!sourcePayload || !draftTransformConfig) {
     if (transformSummarySubtitle) transformSummarySubtitle.textContent = "Upload a CSV to begin preparing the dataset.";
@@ -1559,6 +2031,7 @@ function renderStatsToolbar() {
       }
       renderStatsToolbar();
       renderStatsTable();
+      persistAppStateSoon();
     },
   });
 
@@ -1577,6 +2050,7 @@ function renderStatsToolbar() {
       }
       renderStatsToolbar();
       renderCategoricalSummary();
+      persistAppStateSoon();
     },
   });
 }
@@ -2456,6 +2930,7 @@ function renderCorrelationToggles() {
       }
       focusedMatrixPair = null;
       renderCorrelationMatrixExplorer();
+      persistAppStateSoon();
     });
     corrMatrixToggles.appendChild(button);
   });
@@ -2583,6 +3058,7 @@ function renderCorrelationMatrixExplorer() {
           }
           focusedMatrixPair = { xColumn, yColumn };
           renderFocusedMatrixScatter();
+          persistAppStateSoon();
         });
         Plotly.Plots.resize(node);
       });
@@ -2651,6 +3127,7 @@ function scheduleResponsivePlotResize() {
   responsivePlotResizeFrame = requestAnimationFrame(() => {
     responsivePlotResizeFrame = 0;
     resizeDistributionPlot();
+    resizeOutlierPlots();
     resizeCorrelationPlots();
   });
 }
@@ -2678,6 +3155,8 @@ function initializeResponsivePlotObserver() {
     viewerShell,
     viewerStage,
     distributionPanel,
+    transformationPanel,
+    prepDiagnosticsPanel,
     correlationPanel,
   ].filter(Boolean).forEach((node) => {
     responsivePlotObservedSizes.set(node, {
@@ -3046,6 +3525,783 @@ function renderDistributionView() {
   renderDistributionShapePlots(series, distributionColumn, distributionSplitColumn);
 }
 
+function outlierMethodLabel(method) {
+  if (method === "zscore") return "Z-Score";
+  if (method === "modified_zscore") return "Modified Z-Score";
+  return "IQR Fences";
+}
+
+function outlierMethodConfig(method = outlierMethod) {
+  return OUTLIER_METHOD_CONFIG[method] || OUTLIER_METHOD_CONFIG.iqr;
+}
+
+function normalizeThresholdForMethod(method, value) {
+  const config = outlierMethodConfig(method);
+  const numeric = Number.isFinite(value) ? value : config.defaultThreshold;
+  const clamped = Math.min(config.max, Math.max(config.min, numeric));
+  const step = config.step || 0.1;
+  const precision = Math.max(0, (String(step).split(".")[1] || "").length);
+  return Number((Math.round(clamped / step) * step).toFixed(precision));
+}
+
+function syncOutlierThresholdControl() {
+  const config = outlierMethodConfig(outlierMethod);
+  outlierThreshold = normalizeThresholdForMethod(outlierMethod, outlierThreshold);
+  if (outlierThresholdLabel) {
+    outlierThresholdLabel.textContent = config.label;
+  }
+  if (outlierThresholdMeta) {
+    outlierThresholdMeta.textContent = config.note;
+  }
+  if (outlierThresholdSlider) {
+    outlierThresholdSlider.min = String(config.min);
+    outlierThresholdSlider.max = String(config.max);
+    outlierThresholdSlider.step = String(config.step);
+    outlierThresholdSlider.value = String(outlierThreshold);
+  }
+}
+
+function outlierThresholdSummary(method = outlierMethod, threshold = outlierThreshold) {
+  if (method === "zscore") return `|z| > ${threshold.toFixed(2)}`;
+  if (method === "modified_zscore") return `|modified z| > ${threshold.toFixed(2)}`;
+  return `${threshold.toFixed(2)} x IQR`;
+}
+
+function updateOutlierThresholdLabel() {
+  syncOutlierThresholdControl();
+  if (outlierThresholdValue) {
+    outlierThresholdValue.textContent = outlierThreshold.toFixed(2);
+  }
+  if (outlierThresholdSlider) {
+    const min = Number(outlierThresholdSlider.min) || outlierMethodConfig(outlierMethod).min;
+    const max = Number(outlierThresholdSlider.max) || outlierMethodConfig(outlierMethod).max;
+    const progress = ((outlierThreshold - min) / Math.max(0.0001, max - min)) * 100;
+    outlierThresholdSlider.style.setProperty("--alpha-progress", `${Math.max(0, Math.min(100, progress))}%`);
+  }
+}
+
+function outlierSummaryText(selectedCount, totalCount) {
+  if (!totalCount) return "No numeric columns available";
+  if (!selectedCount) return "No numeric columns selected";
+  if (selectedCount === totalCount) return `All ${totalCount.toLocaleString()} numeric columns selected`;
+  return `${selectedCount.toLocaleString()} of ${totalCount.toLocaleString()} numeric columns selected`;
+}
+
+function resolveOutlierRowLabel(row, index, labelColumn = outlierIdColumn) {
+  if (labelColumn && labelColumn !== NONE_OPTION) {
+    const value = normalizeValue(row[labelColumn]);
+    if (value !== null) return String(value);
+  }
+  return `Row ${index + 1}`;
+}
+
+function preferredOutlierReviewColumns(payload) {
+  if (!payload) return [];
+  return uniqueOrderedColumns([
+    ...payload.numeric_columns.filter((column) => outlierSelectedColumns.includes(column)),
+    ...payload.numeric_columns,
+  ]);
+}
+
+function firstDistinctOutlierColumn(columns, used = new Set()) {
+  return columns.find((column) => column && column !== NONE_OPTION && !used.has(column)) || null;
+}
+
+function syncOutlierReviewState(payload, selectedColumns = null) {
+  if (!payload) {
+    outlierFocusColumn = null;
+    outlierScatterXColumn = null;
+    outlierScatterYColumn = null;
+    outlierSelectedRowIndex = null;
+    return;
+  }
+
+  const numericColumns = payload.numeric_columns;
+  const reviewColumns = Array.isArray(selectedColumns) && selectedColumns.length ? selectedColumns : numericColumns;
+  const preferredColumns = preferredOutlierReviewColumns(payload);
+
+  if (!reviewColumns.includes(outlierFocusColumn)) {
+    outlierFocusColumn = reviewColumns[0] || null;
+  }
+
+  if (!numericColumns.includes(outlierScatterXColumn)) {
+    outlierScatterXColumn = firstDistinctOutlierColumn(preferredColumns) || null;
+  }
+  if (!numericColumns.includes(outlierScatterYColumn) || outlierScatterYColumn === outlierScatterXColumn) {
+    outlierScatterYColumn = firstDistinctOutlierColumn(preferredColumns, new Set(outlierScatterXColumn ? [outlierScatterXColumn] : []));
+  }
+
+  if (outlierSelectedRowIndex !== null) {
+    const validIndex = Number.isInteger(outlierSelectedRowIndex)
+      && outlierSelectedRowIndex >= 0
+      && outlierSelectedRowIndex < payload.records.length;
+    if (!validIndex) outlierSelectedRowIndex = null;
+  }
+}
+
+function setOutlierScatterAxis(axis, value) {
+  const payload = currentPayload;
+  const numericColumns = payload?.numeric_columns || [];
+  const nextValue = numericColumns.includes(value) ? value : null;
+  const preferredColumns = payload ? preferredOutlierReviewColumns(payload) : numericColumns;
+
+  if (axis === "x") {
+    outlierScatterXColumn = nextValue;
+    if (outlierScatterXColumn && outlierScatterXColumn === outlierScatterYColumn) {
+      outlierScatterYColumn = firstDistinctOutlierColumn(preferredColumns, new Set([outlierScatterXColumn]));
+    }
+    return;
+  }
+
+  outlierScatterYColumn = nextValue;
+  if (outlierScatterYColumn && outlierScatterYColumn === outlierScatterXColumn) {
+    outlierScatterXColumn = firstDistinctOutlierColumn(preferredColumns, new Set([outlierScatterYColumn]));
+  }
+}
+
+function outlierSummaryForColumn(payload, column, method, threshold) {
+  const indexedValues = payload.records
+    .map((row, index) => ({ index, value: toFiniteNumber(row[column]) }))
+    .filter((entry) => entry.value !== null);
+  if (indexedValues.length < 2) {
+    return {
+      column,
+      method,
+      threshold,
+      flaggedIndices: new Map(),
+      flaggedCount: 0,
+      usableCount: indexedValues.length,
+      missingCount: payload.records.length - indexedValues.length,
+      lowerBound: null,
+      upperBound: null,
+      center: null,
+      spread: null,
+      ruleLabel: "Not enough usable values",
+    };
+  }
+
+  const values = indexedValues.map((entry) => entry.value);
+  const flaggedIndices = new Map();
+  let lowerBound = null;
+  let upperBound = null;
+  let center = null;
+  let spread = null;
+  let ruleLabel = "";
+
+  if (method === "zscore") {
+    center = meanValue(values);
+    spread = standardDeviation(values);
+    ruleLabel = `|z| > ${threshold.toFixed(2)}`;
+    if (spread !== null && spread > 0) {
+      indexedValues.forEach(({ index, value }) => {
+        const score = Math.abs((value - center) / spread);
+        if (score > threshold) flaggedIndices.set(index, score / threshold);
+      });
+    }
+  } else if (method === "modified_zscore") {
+    center = medianValue(values);
+    const deviations = values.map((value) => Math.abs(value - center)).sort((left, right) => left - right);
+    spread = medianValue(deviations);
+    ruleLabel = `|modified z| > ${threshold.toFixed(2)}`;
+    if (spread !== null && spread > 0) {
+      indexedValues.forEach(({ index, value }) => {
+        const score = Math.abs((0.6745 * (value - center)) / spread);
+        if (score > threshold) flaggedIndices.set(index, score / threshold);
+      });
+    }
+  } else {
+    const q1 = quantileValue(values, 0.25);
+    const q3 = quantileValue(values, 0.75);
+    spread = q1 !== null && q3 !== null ? q3 - q1 : null;
+    center = medianValue(values);
+    lowerBound = q1 === null || spread === null ? null : q1 - (threshold * spread);
+    upperBound = q3 === null || spread === null ? null : q3 + (threshold * spread);
+    ruleLabel = spread === 0
+      ? `Outside [${formatStatValue(lowerBound)}, ${formatStatValue(upperBound)}]`
+      : `${threshold.toFixed(2)} × IQR fences`;
+    if (lowerBound !== null && upperBound !== null) {
+      indexedValues.forEach(({ index, value }) => {
+        if (value < lowerBound) {
+          const denom = spread && spread > 0 ? spread : Math.max(Math.abs(center || 0), 1);
+          flaggedIndices.set(index, (lowerBound - value) / denom);
+        } else if (value > upperBound) {
+          const denom = spread && spread > 0 ? spread : Math.max(Math.abs(center || 0), 1);
+          flaggedIndices.set(index, (value - upperBound) / denom);
+        }
+      });
+    }
+  }
+
+  return {
+    column,
+    method,
+    threshold,
+    flaggedIndices,
+    flaggedCount: flaggedIndices.size,
+    usableCount: indexedValues.length,
+    missingCount: payload.records.length - indexedValues.length,
+    lowerBound,
+    upperBound,
+    center,
+    spread,
+    ruleLabel,
+  };
+}
+
+function computeOutlierAnalysis(payload) {
+  if (!payload) return null;
+  const selectedColumns = payload.numeric_columns.filter((column) => outlierSelectedColumns.includes(column));
+  syncOutlierReviewState(payload, selectedColumns);
+  if (!selectedColumns.length) {
+    return {
+      selectedColumns: [],
+      columnSummaries: [],
+      flaggedRows: [],
+      flaggedRowCount: 0,
+      flaggedValueCount: 0,
+      focusColumn: null,
+      selectedRow: null,
+      scatterColumns: [],
+    };
+  }
+
+  const columnSummaries = selectedColumns
+    .map((column) => outlierSummaryForColumn(payload, column, outlierMethod, outlierThreshold))
+    .sort((left, right) => {
+      if (right.flaggedCount !== left.flaggedCount) return right.flaggedCount - left.flaggedCount;
+      return left.column.localeCompare(right.column, undefined, { numeric: true, sensitivity: "base" });
+    });
+
+  const flaggedRows = new Map();
+  columnSummaries.forEach((summary) => {
+    summary.flaggedIndices.forEach((severity, index) => {
+      if (!flaggedRows.has(index)) {
+        flaggedRows.set(index, {
+          index,
+          row: payload.records[index],
+          label: resolveOutlierRowLabel(payload.records[index], index),
+          score: 0,
+          flaggedColumns: [],
+        });
+      }
+      const entry = flaggedRows.get(index);
+      entry.score += severity;
+      entry.flaggedColumns.push({
+        column: summary.column,
+        value: payload.records[index][summary.column],
+        severity,
+      });
+    });
+  });
+
+  const rankedRows = [...flaggedRows.values()]
+    .map((entry) => ({
+      ...entry,
+      flaggedColumns: entry.flaggedColumns.sort((left, right) => right.severity - left.severity),
+      flaggedCount: entry.flaggedColumns.length,
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      if (right.flaggedCount !== left.flaggedCount) return right.flaggedCount - left.flaggedCount;
+      return left.index - right.index;
+    });
+
+  const focusColumn = selectedColumns.includes(outlierFocusColumn)
+    ? outlierFocusColumn
+    : (selectedColumns[0] || null);
+  const scatterColumns = [];
+  if (payload.numeric_columns.includes(outlierScatterXColumn)) {
+    scatterColumns.push(outlierScatterXColumn);
+  }
+  if (
+    payload.numeric_columns.includes(outlierScatterYColumn)
+    && outlierScatterYColumn !== outlierScatterXColumn
+  ) {
+    scatterColumns.push(outlierScatterYColumn);
+  }
+  if (scatterColumns.length < 2) {
+    preferredOutlierReviewColumns(payload).forEach((column) => {
+      if (scatterColumns.length < 2 && !scatterColumns.includes(column)) {
+        scatterColumns.push(column);
+      }
+    });
+  }
+  const selectedRow = rankedRows.find((entry) => entry.index === outlierSelectedRowIndex) || null;
+
+  return {
+    selectedColumns,
+    columnSummaries,
+    flaggedRows: rankedRows,
+    flaggedRowCount: rankedRows.length,
+    flaggedValueCount: columnSummaries.reduce((sum, summary) => sum + summary.flaggedCount, 0),
+    focusColumn,
+    selectedRow,
+    scatterColumns,
+  };
+}
+
+function renderOutlierSummaryCards(analysis) {
+  if (!outlierSummaryMetrics) return;
+  if (!analysis || !analysis.selectedColumns.length) {
+    outlierSummaryMetrics.innerHTML = "";
+    return;
+  }
+  const topColumn = analysis.columnSummaries[0];
+  const flaggedRate = currentPayload?.records?.length
+    ? `${((analysis.flaggedRowCount / currentPayload.records.length) * 100).toFixed(1)}% of prepared rows`
+    : "No prepared rows";
+  const cards = [
+    { label: "Rows Flagged", value: analysis.flaggedRowCount.toLocaleString(), note: `${flaggedRate} | ${analysis.flaggedValueCount.toLocaleString()} flagged values` },
+    { label: "Method", value: outlierMethodLabel(outlierMethod), note: outlierThresholdSummary(outlierMethod, outlierThreshold) },
+    { label: "Columns Reviewed", value: analysis.selectedColumns.length.toLocaleString(), note: `${currentPayload.numeric_columns.length.toLocaleString()} numeric columns available` },
+    { label: "Most Flagged Column", value: topColumn ? topColumn.column : "None", note: topColumn ? `${topColumn.flaggedCount.toLocaleString()} rows flagged` : "No flagged rows" },
+  ];
+  outlierSummaryMetrics.innerHTML = cards.map((item) => `
+    <div class="corr-metric-card">
+      <div class="corr-metric-label">${escapeHtml(item.label)}</div>
+      <div class="corr-metric-value">${escapeHtml(item.value)}</div>
+      <div class="transform-metric-note">${escapeHtml(item.note)}</div>
+    </div>
+  `).join("");
+}
+
+function setSelectedOutlierRow(index) {
+  outlierSelectedRowIndex = outlierSelectedRowIndex === index ? null : index;
+  renderOutlierView();
+  persistAppStateSoon();
+}
+
+function renderOutlierReviewControls(analysis) {
+  const selectedColumns = analysis?.selectedColumns || [];
+  const numericColumns = currentPayload?.numeric_columns || [];
+  const focusOptions = selectedColumns.length ? selectedColumns : [NONE_OPTION];
+  const scatterOptions = [NONE_OPTION, ...numericColumns];
+
+  populateSimpleSelect(outlierFocusSelect, focusOptions, outlierFocusColumn || focusOptions[0]);
+  if (outlierFocusSelect) {
+    if (!selectedColumns.length && outlierFocusSelect.options[0]) {
+      outlierFocusSelect.options[0].textContent = "Select reviewed column";
+    }
+    outlierFocusSelect.disabled = !selectedColumns.length;
+    outlierFocusColumn = selectedColumns.length ? outlierFocusSelect.value : null;
+  }
+
+  populateSimpleSelect(outlierScatterXSelect, scatterOptions, outlierScatterXColumn || NONE_OPTION);
+  populateSimpleSelect(outlierScatterYSelect, scatterOptions, outlierScatterYColumn || NONE_OPTION);
+  if (outlierScatterXSelect?.options[0]) outlierScatterXSelect.options[0].textContent = "Choose X axis";
+  if (outlierScatterYSelect?.options[0]) outlierScatterYSelect.options[0].textContent = "Choose Y axis";
+  if (outlierScatterXSelect) {
+    outlierScatterXSelect.disabled = !numericColumns.length;
+    outlierScatterXColumn = outlierScatterXSelect.value !== NONE_OPTION ? outlierScatterXSelect.value : null;
+  }
+  if (outlierScatterYSelect) {
+    outlierScatterYSelect.disabled = numericColumns.length < 2;
+    outlierScatterYColumn = outlierScatterYSelect.value !== NONE_OPTION ? outlierScatterYSelect.value : null;
+  }
+
+  if (outlierColumnSummary) {
+    outlierColumnSummary.textContent = selectedColumns.length
+      ? `Click a column to focus the distribution chart.`
+      : "";
+  }
+  if (outlierRowSummary) {
+    if (!analysis?.flaggedRows?.length) {
+      outlierRowSummary.textContent = "";
+    } else {
+      const visibleCount = Math.min(OUTLIER_ROW_TABLE_LIMIT, analysis.flaggedRows.length);
+      const selectedPrefix = analysis.selectedRow ? `${analysis.selectedRow.label} pinned. ` : "";
+      outlierRowSummary.textContent = `${selectedPrefix}Showing top ${visibleCount.toLocaleString()} of ${analysis.flaggedRows.length.toLocaleString()} flagged rows. Click a row to highlight it in the charts.`;
+    }
+  }
+}
+
+function renderOutlierColumnTable(analysis) {
+  if (!outlierColumnSheet) return;
+  if (!currentPayload) {
+    outlierColumnSheet.innerHTML = '<div class="stats-empty">Upload a CSV to inspect potential outliers.</div>';
+    return;
+  }
+  if (!analysis?.selectedColumns.length) {
+    outlierColumnSheet.innerHTML = '<div class="stats-empty">Select one or more numeric parameters to review potential outliers.</div>';
+    return;
+  }
+  const headers = ["Column", "Flagged Rows", "Flag Rate", "Rule", "Reference"];
+  let html = '<table class="stats-table"><thead><tr>';
+  headers.forEach((header) => {
+    html += `<th>${escapeHtml(header)}</th>`;
+  });
+  html += "</tr></thead><tbody>";
+  analysis.columnSummaries.forEach((summary) => {
+    const reference = summary.method === "iqr"
+      ? `[${formatStatValue(summary.lowerBound)}, ${formatStatValue(summary.upperBound)}]`
+      : `${formatStatValue(summary.center)} ± ${formatStatValue(summary.spread)}`;
+    const rate = summary.usableCount ? `${((summary.flaggedCount / summary.usableCount) * 100).toFixed(1)}%` : "0.0%";
+    const isSelected = summary.column === analysis.focusColumn ? " selected" : "";
+    html += `<tr class="outlier-click-row${isSelected}" data-outlier-column="${escapeHtmlAttribute(summary.column)}" tabindex="0">
+      <th class="stats-parameter">${escapeHtml(summary.column)}</th>
+      <td>${escapeHtml(summary.flaggedCount.toLocaleString())}</td>
+      <td>${escapeHtml(rate)}</td>
+      <td>${escapeHtml(summary.ruleLabel)}</td>
+      <td>${escapeHtml(reference)}</td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  outlierColumnSheet.innerHTML = html;
+  outlierColumnSheet.querySelectorAll("[data-outlier-column]").forEach((row) => {
+    const activate = () => {
+      const nextColumn = row.getAttribute("data-outlier-column");
+      if (!nextColumn || nextColumn === outlierFocusColumn) return;
+      outlierFocusColumn = nextColumn;
+      renderOutlierView();
+      persistAppStateSoon();
+    };
+    row.addEventListener("click", activate);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
+  });
+}
+
+function renderOutlierRowTable(analysis) {
+  if (!outlierRowSheet) return;
+  if (!currentPayload) {
+    outlierRowSheet.innerHTML = '<div class="stats-empty">Upload a CSV to inspect flagged rows.</div>';
+    return;
+  }
+  if (!analysis?.selectedColumns.length) {
+    outlierRowSheet.innerHTML = '<div class="stats-empty">Select one or more numeric parameters to rank potentially unusual rows.</div>';
+    return;
+  }
+  if (!analysis.flaggedRows.length) {
+    outlierRowSheet.innerHTML = '<div class="stats-empty">No rows are currently flagged under the selected outlier method and threshold.</div>';
+    return;
+  }
+  const headers = ["Row", "Severity", "Flagged Columns", "Preview Values"];
+  let html = '<table class="stats-table"><thead><tr>';
+  headers.forEach((header) => {
+    html += `<th>${escapeHtml(header)}</th>`;
+  });
+  html += "</tr></thead><tbody>";
+  analysis.flaggedRows.slice(0, OUTLIER_ROW_TABLE_LIMIT).forEach((entry) => {
+    const columnList = entry.flaggedColumns.map((item) => item.column).join(", ");
+    const preview = entry.flaggedColumns.slice(0, 4).map((item) => `${item.column}: ${formatStatValue(item.value)}`).join(" | ");
+    const isSelected = entry.index === analysis.selectedRow?.index ? " selected" : "";
+    html += `<tr class="outlier-click-row${isSelected}" data-outlier-row-index="${escapeHtmlAttribute(String(entry.index))}" tabindex="0">
+      <th class="stats-parameter"><span class="outlier-row-id">${escapeHtml(entry.label)}</span></th>
+      <td>${escapeHtml(entry.score.toFixed(2))}</td>
+      <td><div class="outlier-row-columns">${escapeHtml(columnList)}</div></td>
+      <td>${escapeHtml(preview)}</td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  outlierRowSheet.innerHTML = html;
+  outlierRowSheet.querySelectorAll("[data-outlier-row-index]").forEach((row) => {
+    const activate = () => {
+      const rawIndex = row.getAttribute("data-outlier-row-index");
+      const nextIndex = Number(rawIndex);
+      if (!Number.isInteger(nextIndex)) return;
+      setSelectedOutlierRow(nextIndex);
+    };
+    row.addEventListener("click", activate);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
+  });
+}
+
+function renderOutlierScatterPlot(analysis) {
+  if (!outlierScatterPlot) return;
+  if (!analysis?.scatterColumns?.length || analysis.scatterColumns.length < 2) {
+    renderCorrelationEmpty(outlierScatterPlot, "Select at least two numeric columns to compare flagged rows in a scatter plot.");
+    return;
+  }
+  if (!hasPlotly()) {
+    renderCorrelationEmpty(outlierScatterPlot, "Plotly is not loaded, so outlier charts are unavailable.");
+    return;
+  }
+  const [xColumn, yColumn] = analysis.scatterColumns;
+  const flaggedIndices = new Set(analysis.flaggedRows.map((entry) => entry.index));
+  const regular = { x: [], y: [], text: [], customdata: [] };
+  const flagged = { x: [], y: [], text: [], customdata: [] };
+  const selected = { x: [], y: [], text: [], customdata: [] };
+
+  currentPayload.records.forEach((row, index) => {
+    const x = toFiniteNumber(row[xColumn]);
+    const y = toFiniteNumber(row[yColumn]);
+    if (x === null || y === null) return;
+    const target = flaggedIndices.has(index) ? flagged : regular;
+    target.x.push(x);
+    target.y.push(y);
+    target.text.push(resolveOutlierRowLabel(row, index));
+    target.customdata.push(index);
+    if (analysis.selectedRow?.index === index) {
+      selected.x.push(x);
+      selected.y.push(y);
+      selected.text.push(resolveOutlierRowLabel(row, index));
+      selected.customdata.push(index);
+    }
+  });
+
+  if (!regular.x.length && !flagged.x.length) {
+    renderCorrelationEmpty(outlierScatterPlot, "Not enough overlapping numeric rows remain to draw the review scatter.");
+    return;
+  }
+
+  outlierScatterPlot.innerHTML = "";
+  const traces = [
+    {
+      type: "scatter",
+      mode: "markers",
+      name: "Background Rows",
+      x: regular.x,
+      y: regular.y,
+      text: regular.text,
+      customdata: regular.customdata,
+      marker: { color: "rgba(148, 163, 184, 0.45)", size: 8 },
+      hovertemplate: "%{text}<br>" + escapeHtml(xColumn) + ": %{x}<br>" + escapeHtml(yColumn) + ": %{y}<extra></extra>",
+    },
+    {
+      type: "scatter",
+      mode: "markers",
+      name: "Flagged Rows",
+      x: flagged.x,
+      y: flagged.y,
+      text: flagged.text,
+      customdata: flagged.customdata,
+      marker: { color: "#ff8a1f", size: 10, line: { color: "#fff1d6", width: 1 } },
+      hovertemplate: "%{text}<br>" + escapeHtml(xColumn) + ": %{x}<br>" + escapeHtml(yColumn) + ": %{y}<extra></extra>",
+    },
+  ];
+  if (selected.x.length) {
+    traces.push({
+      type: "scatter",
+      mode: "markers",
+      name: "Pinned Row",
+      x: selected.x,
+      y: selected.y,
+      text: selected.text,
+      customdata: selected.customdata,
+      marker: { color: "#ffe26d", size: 14, symbol: "diamond", line: { color: "#fff7d1", width: 2 } },
+      hovertemplate: "%{text}<br>" + escapeHtml(xColumn) + ": %{x}<br>" + escapeHtml(yColumn) + ": %{y}<extra></extra>",
+    });
+  }
+  const renderPromise = Plotly.newPlot("outlier-scatter-plot", traces, {
+    paper_bgcolor: DISTRIBUTION_PAPER_BG,
+    plot_bgcolor: DISTRIBUTION_PLOT_BG,
+    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: DISTRIBUTION_FONT_COLOR },
+    margin: { l: 56, r: 24, t: 24, b: 52 },
+    legend: {
+      orientation: "h",
+      yanchor: "bottom",
+      y: 1.02,
+      xanchor: "left",
+      x: 0,
+      bgcolor: DISTRIBUTION_LEGEND_BG,
+      bordercolor: DISTRIBUTION_LEGEND_BORDER,
+      borderwidth: 1,
+    },
+    xaxis: { title: { text: xColumn }, gridcolor: DISTRIBUTION_GRID_COLOR, tickfont: { color: DISTRIBUTION_FONT_COLOR } },
+    yaxis: { title: { text: yColumn }, gridcolor: DISTRIBUTION_GRID_COLOR, tickfont: { color: DISTRIBUTION_FONT_COLOR } },
+  }, {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ["lasso2d", "select2d"],
+  });
+  if (renderPromise?.then) {
+    renderPromise.then(() => {
+      if (typeof outlierScatterPlot.removeAllListeners === "function") {
+        outlierScatterPlot.removeAllListeners("plotly_click");
+      }
+      if (typeof outlierScatterPlot.on === "function") {
+        outlierScatterPlot.on("plotly_click", (event) => {
+          const rawIndex = event?.points?.[0]?.customdata;
+          const nextIndex = Number(Array.isArray(rawIndex) ? rawIndex[0] : rawIndex);
+          if (!Number.isInteger(nextIndex) || !flaggedIndices.has(nextIndex)) return;
+          setSelectedOutlierRow(nextIndex);
+        });
+      }
+      resizeOutlierPlots();
+    }).catch(() => {
+      renderCorrelationEmpty(outlierScatterPlot, "Could not render the outlier scatter plot.");
+    });
+  }
+}
+
+function renderOutlierHistogram(analysis) {
+  if (!outlierHistogramPlot) return;
+  const focusColumn = analysis?.focusColumn;
+  if (!focusColumn) {
+    renderCorrelationEmpty(outlierHistogramPlot, "Select numeric columns to review a flagged-value distribution.");
+    return;
+  }
+  if (!hasPlotly()) {
+    renderCorrelationEmpty(outlierHistogramPlot, "Plotly is not loaded, so outlier charts are unavailable.");
+    return;
+  }
+  const summary = analysis.columnSummaries.find((item) => item.column === focusColumn);
+  const flaggedIndices = summary ? new Set(summary.flaggedIndices.keys()) : new Set();
+  const selectedValue = analysis.selectedRow ? toFiniteNumber(analysis.selectedRow.row[focusColumn]) : null;
+  const allValues = [];
+  const flaggedValues = [];
+  currentPayload.records.forEach((row, index) => {
+    const value = toFiniteNumber(row[focusColumn]);
+    if (value === null) return;
+    allValues.push(value);
+    if (flaggedIndices.has(index)) flaggedValues.push(value);
+  });
+  if (!allValues.length) {
+    renderCorrelationEmpty(outlierHistogramPlot, "No numeric values remain for the selected outlier focus column.");
+    return;
+  }
+
+  outlierHistogramPlot.innerHTML = "";
+  const renderPromise = Plotly.newPlot("outlier-histogram-plot", [
+    {
+      type: "histogram",
+      x: allValues,
+      name: "All Rows",
+      marker: { color: "rgba(143, 61, 255, 0.78)" },
+      opacity: 0.78,
+      nbinsx: 28,
+      hovertemplate: `${escapeHtml(focusColumn)}: %{x}<br>Count: %{y}<extra></extra>`,
+    },
+    {
+      type: "histogram",
+      x: flaggedValues,
+      name: "Flagged Rows",
+      marker: { color: "rgba(255, 138, 31, 0.92)" },
+      opacity: 0.88,
+      nbinsx: 28,
+      hovertemplate: `${escapeHtml(focusColumn)}: %{x}<br>Flagged count: %{y}<extra></extra>`,
+    },
+  ], {
+    paper_bgcolor: DISTRIBUTION_PAPER_BG,
+    plot_bgcolor: DISTRIBUTION_PLOT_BG,
+    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: DISTRIBUTION_FONT_COLOR },
+    margin: { l: 56, r: 24, t: 24, b: 52 },
+    barmode: "overlay",
+    legend: {
+      orientation: "h",
+      yanchor: "bottom",
+      y: 1.02,
+      xanchor: "left",
+      x: 0,
+      bgcolor: DISTRIBUTION_LEGEND_BG,
+      bordercolor: DISTRIBUTION_LEGEND_BORDER,
+      borderwidth: 1,
+    },
+    xaxis: { title: { text: focusColumn }, gridcolor: DISTRIBUTION_GRID_COLOR, tickfont: { color: DISTRIBUTION_FONT_COLOR } },
+    yaxis: { title: { text: "Count" }, gridcolor: DISTRIBUTION_GRID_COLOR, tickfont: { color: DISTRIBUTION_FONT_COLOR } },
+    shapes: selectedValue === null ? [] : [{
+      type: "line",
+      x0: selectedValue,
+      x1: selectedValue,
+      xref: "x",
+      y0: 0,
+      y1: 1,
+      yref: "paper",
+      line: { color: "#ffe26d", width: 3, dash: "dot" },
+    }],
+    annotations: selectedValue === null ? [] : [{
+      x: selectedValue,
+      y: 1.02,
+      yref: "paper",
+      text: String(analysis.selectedRow.label),
+      showarrow: false,
+      font: { color: "#ffe7a3", size: 12, family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif' },
+      xanchor: "center",
+      yanchor: "bottom",
+      bgcolor: "rgba(18, 20, 28, 0.88)",
+      bordercolor: "rgba(255, 226, 109, 0.45)",
+      borderwidth: 1,
+      borderpad: 4,
+    }],
+  }, {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ["lasso2d", "select2d"],
+  });
+  if (renderPromise?.then) {
+    renderPromise.then(() => resizeOutlierPlots()).catch(() => {
+      renderCorrelationEmpty(outlierHistogramPlot, "Could not render the outlier distribution chart.");
+    });
+  }
+}
+
+function resizeOutlierPlots() {
+  if (!hasPlotly()) return;
+  [outlierScatterPlot, outlierHistogramPlot].forEach((node) => {
+    if (node && node.data) Plotly.Plots.resize(node);
+  });
+}
+
+function renderOutlierView() {
+  updateOutlierThresholdLabel();
+  if (!currentPayload) {
+    if (outlierNote) outlierNote.textContent = "Upload a CSV to start reviewing potential outliers.";
+    renderOutlierReviewControls(null);
+    renderOutlierSummaryCards(null);
+    renderOutlierColumnTable(null);
+    renderOutlierRowTable(null);
+    renderCorrelationEmpty(outlierScatterPlot, "Upload a CSV to start reviewing potential outliers.");
+    renderCorrelationEmpty(outlierHistogramPlot, "Upload a CSV to start reviewing potential outliers.");
+    return;
+  }
+
+  if (outlierMethodSelect) outlierMethodSelect.value = outlierMethod;
+  populateSimpleSelect(outlierIdSelect, [NONE_OPTION, ...currentPayload.columns], outlierIdColumn || NONE_OPTION);
+  if (outlierIdSelect) outlierIdSelect.options[0].textContent = "Row Number";
+  outlierIdColumn = outlierIdSelect?.value || NONE_OPTION;
+  if (outlierSearch) outlierSearch.value = outlierSearchValue;
+
+  updateSelectorSummary(outlierSelectionSummary, outlierSelectedColumns.length, currentPayload.numeric_columns.length, "numeric");
+  if (outlierSelectVisibleButton) {
+    outlierSelectVisibleButton.disabled = !filterColumnsByQuery(currentPayload.numeric_columns, outlierSearchValue).length;
+  }
+  if (outlierClearColumnsButton) outlierClearColumnsButton.disabled = !outlierSelectedColumns.length;
+  renderColumnSelector({
+    container: outlierColumnSelector,
+    columns: currentPayload.numeric_columns,
+    selectedColumns: outlierSelectedColumns,
+    searchValue: outlierSearchValue,
+    emptyMessage: "Upload a CSV to browse numeric columns.",
+    noMatchMessage: "No numeric columns match the current search.",
+    onToggle: (column) => {
+      if (outlierSelectedColumns.includes(column)) {
+        outlierSelectedColumns = outlierSelectedColumns.filter((value) => value !== column);
+      } else {
+        outlierSelectedColumns = [...outlierSelectedColumns, column];
+      }
+      outlierSelectedRowIndex = null;
+      renderOutlierView();
+      persistAppStateSoon();
+    },
+  });
+
+  const analysis = computeOutlierAnalysis(currentPayload);
+  if (outlierSelectedRowIndex !== null && !analysis?.selectedRow) {
+    outlierSelectedRowIndex = null;
+  }
+  if (analysis?.focusColumn) outlierFocusColumn = analysis.focusColumn;
+  renderOutlierReviewControls(analysis);
+  if (outlierNote) {
+    outlierNote.textContent = analysis?.selectedColumns?.length
+      ? `${outlierMethodLabel(outlierMethod)} is running on the prepared dataset, so current filters and transformations are already reflected. Click a column to focus the histogram and click a row to pin it in both charts.`
+      : "Select numeric columns to review potentially unusual rows in the prepared dataset.";
+  }
+  renderOutlierSummaryCards(analysis);
+  renderOutlierColumnTable(analysis);
+  renderOutlierRowTable(analysis);
+  renderOutlierScatterPlot(analysis);
+  renderOutlierHistogram(analysis);
+}
+
 function setOuterView(view) {
   activeOuterView = view;
   if (!dashboardTab || !statisticsTab || !distributionTab || !correlationTab || !dashboardPanel || !transformationPanel || !statisticsPanel || !distributionPanel || !correlationPanel) return;
@@ -3069,12 +4325,14 @@ function setOuterView(view) {
   }
   if (showTransformation) {
     renderTransformationView();
-  }
-  if (showDistribution) {
+    if (activePrepView === "diagnostics") {
+      renderOutlierView();
+      setTimeout(() => resizeOutlierPlots(), 0);
+    }
+  } else if (showDistribution) {
     renderDistributionView();
     setTimeout(() => resizeDistributionPlot(), 0);
-  }
-  if (showCorrelation) {
+  } else if (showCorrelation) {
     renderCorrelationView();
     setTimeout(() => resizeCorrelationPlots(), 0);
     setTimeout(() => {
@@ -3086,6 +4344,7 @@ function setOuterView(view) {
     }, 60);
   }
   renderPrepSummary();
+  persistAppStateSoon();
 }
 
 function normalizeValue(value) {
@@ -3276,8 +4535,9 @@ function renderInfoTooltipLabel(label, description, className = "stats-term-head
   return `<span class="${escapeHtmlAttribute(className)}">${safeLabel}<button type="button" class="stats-term-info" aria-label="${safeAriaLabel}" data-tooltip="${safeDescription}">i</button></span>`;
 }
 
-function buildDashboardHtml(payload) {
+function buildDashboardHtml(payload, persistedViewState = null) {
   const payloadJson = JSON.stringify(payload).replaceAll("</script>", "<\\/script>");
+  const persistedViewStateJson = JSON.stringify(persistedViewState || {}).replaceAll("</script>", "<\\/script>");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3618,6 +4878,7 @@ function buildDashboardHtml(payload) {
   <script>
     const NONE_OPTION = "${NONE_OPTION}";
     const DATASET = ${payloadJson};
+    const INITIAL_STATE = ${persistedViewStateJson};
     const DEFAULT_DISCRETE_COLORS = [
       "#ae5cff", "#8d34ea", "#6d28d9", "#c084fc", "#7c3aed",
       "#a855f7", "#d8b4fe", "#8b5cf6", "#4c1d95", "#e9d5ff",
@@ -3647,6 +4908,56 @@ function buildDashboardHtml(payload) {
     const zPillNode = document.getElementById("z-pill");
     const plotNode = document.getElementById("plot");
     const savePlotButton = document.getElementById("save-plot-button");
+
+    function sanitizeInitialState(state) {
+      const next = state && typeof state === "object" ? { ...state } : {};
+      const numericColumns = DATASET.numeric_columns;
+      const colorColumns = [NONE_OPTION, ...DATASET.color_columns];
+      const hoverColumns = [NONE_OPTION, ...DATASET.columns];
+
+      next.x = numericColumns.includes(next.x) ? next.x : DATASET.defaults.x;
+      next.y = numericColumns.includes(next.y) ? next.y : DATASET.defaults.y;
+      next.z = numericColumns.includes(next.z) ? next.z : DATASET.defaults.z;
+      if (next.y === next.x) {
+        next.y = numericColumns.find((column) => column !== next.x) || next.y;
+      }
+      if (next.z === next.x || next.z === next.y) {
+        next.z = numericColumns.find((column) => column !== next.x && column !== next.y) || next.z;
+      }
+      next.color = colorColumns.includes(next.color) ? next.color : DATASET.defaults.color;
+      next.size = [NONE_OPTION, ...numericColumns].includes(next.size) ? next.size : DATASET.defaults.size;
+      next.hoverId = hoverColumns.includes(next.hoverId) ? next.hoverId : DATASET.defaults.hover_id;
+      next.logX = Boolean(next.logX);
+      next.logY = Boolean(next.logY);
+      next.logZ = Boolean(next.logZ);
+      next.opacity = Number.isFinite(Number(next.opacity)) ? Math.max(0.15, Math.min(1, Number(next.opacity))) : 0.8;
+      next.sizeScale = Number.isFinite(Number(next.sizeScale)) ? Math.max(0.6, Math.min(2.4, Number(next.sizeScale))) : 1;
+      return next;
+    }
+
+    function currentViewState() {
+      return {
+        x: xSelect.value,
+        y: ySelect.value,
+        z: zSelect.value,
+        color: colorSelect.value,
+        size: sizeSelect.value,
+        hoverId: hoverIdSelect.value,
+        logX: logX.checked,
+        logY: logY.checked,
+        logZ: logZ.checked,
+        opacity: Number(opacitySlider.value),
+        sizeScale: Number(sizeScaleSlider.value),
+      };
+    }
+
+    function notifyParentState() {
+      try {
+        window.parent.postMessage({ type: "statzooka-dashboard-state", state: currentViewState() }, "*");
+      } catch (error) {
+        // Ignore postMessage failures inside sandboxed previews.
+      }
+    }
 
     function populateSelect(select, options, selectedValue, includeNone = false) {
       select.innerHTML = "";
@@ -4018,16 +5329,23 @@ function buildDashboardHtml(payload) {
       if (aligned.excludedForMissing) noteParts.push(String(aligned.excludedForMissing) + " rows excluded for missing X/Y/Z values.");
       if (aligned.excludedForLog) noteParts.push(String(aligned.excludedForLog) + " rows excluded because log axes need values > 0.");
       statusNote.textContent = noteParts.length ? noteParts.join(" ") : "All rows with valid axis values are shown.";
+      notifyParentState();
     }
 
     function initialize() {
+      const initialState = sanitizeInitialState(INITIAL_STATE);
       titleNode.textContent = DATASET.title;
-      populateSelect(xSelect, DATASET.numeric_columns, DATASET.defaults.x);
-      populateSelect(ySelect, DATASET.numeric_columns, DATASET.defaults.y);
-      populateSelect(zSelect, DATASET.numeric_columns, DATASET.defaults.z);
-      populateSelect(colorSelect, DATASET.color_columns, DATASET.defaults.color, true);
-      populateSelect(sizeSelect, DATASET.numeric_columns, DATASET.defaults.size, true);
-      populateSelect(hoverIdSelect, DATASET.columns, DATASET.defaults.hover_id, true);
+      populateSelect(xSelect, DATASET.numeric_columns, initialState.x);
+      populateSelect(ySelect, DATASET.numeric_columns, initialState.y);
+      populateSelect(zSelect, DATASET.numeric_columns, initialState.z);
+      populateSelect(colorSelect, DATASET.color_columns, initialState.color, true);
+      populateSelect(sizeSelect, DATASET.numeric_columns, initialState.size, true);
+      populateSelect(hoverIdSelect, DATASET.columns, initialState.hoverId, true);
+      logX.checked = initialState.logX;
+      logY.checked = initialState.logY;
+      logZ.checked = initialState.logZ;
+      opacitySlider.value = String(initialState.opacity);
+      sizeScaleSlider.value = String(initialState.sizeScale);
       updateRangeLabels();
       [xSelect, ySelect, zSelect, colorSelect, sizeSelect, hoverIdSelect, logX, logY, logZ, opacitySlider, sizeScaleSlider].forEach((element) => {
         element.addEventListener("input", () => {
@@ -4105,44 +5423,12 @@ fileInput.addEventListener("change", () => {
 });
 
 clearButton.addEventListener("click", () => {
-  setLoading(false);
-  form.reset();
-  sourcePayload = null;
-  currentPayload = null;
-  draftTransformConfig = null;
-  appliedTransformConfig = null;
-  frame.srcdoc = "";
-  setViewerContext("No dashboard loaded yet");
-  emptyState.classList.remove("hidden");
-  if (emptyStateKicker) emptyStateKicker.textContent = "No Data Yet";
-  if (emptyStateTitle) emptyStateTitle.textContent = "Add data to generate a dashboard.";
-  if (emptyStateCopy) emptyStateCopy.textContent = "Drop in a CSV file and the interactive 3D view will appear here.";
-  selectedStatsColumns = [];
-  selectedCategoricalStatsColumns = [];
-  statsNumericSearchValue = "";
-  statsCategoricalSearchValue = "";
-  distributionColumn = null;
-  distributionSplitColumn = NONE_OPTION;
-  distributionViewMode = "histogram";
-  distributionOverlayMode = "kde";
-  distributionBinCount = 24;
-  distributionNormalization = "density";
-  if (statsNumericSearch) statsNumericSearch.value = "";
-  if (statsCategoricalSearch) statsCategoricalSearch.value = "";
-  if (distBinSlider) distBinSlider.value = String(distributionBinCount);
-  selectedMatrixColumns = [];
-  focusedMatrixPair = null;
-  correlationMode = "pair";
-  renderTransformationView();
-  renderStatsToolbar();
-  renderStatsTable();
-  renderCategoricalSummary();
-  renderDistributionView();
-  renderCorrelationView();
-  setOuterView("dashboard");
-  setSelectedFile(null);
-  clearMeta();
-  clearError();
+  if (persistenceWriteTimer) {
+    clearTimeout(persistenceWriteTimer);
+    persistenceWriteTimer = 0;
+  }
+  resetApplicationState();
+  void clearPersistedSnapshot();
 });
 
 if (dashboardTab && statisticsTab && distributionTab && correlationTab) {
@@ -4154,6 +5440,12 @@ if (dashboardTab && statisticsTab && distributionTab && correlationTab) {
 if (prepOpenButton) {
   prepOpenButton.addEventListener("click", () => setOuterView("transformation"));
 }
+if (prepTransformModeButton) {
+  prepTransformModeButton.addEventListener("click", () => setPrepView("transform"));
+}
+if (prepDiagnosticsModeButton) {
+  prepDiagnosticsModeButton.addEventListener("click", () => setPrepView("diagnostics"));
+}
 if (statsNumericDownloadButton) {
   statsNumericDownloadButton.addEventListener("click", downloadNumericStatsCsv);
 }
@@ -4164,12 +5456,14 @@ if (statsNumericSearch) {
   statsNumericSearch.addEventListener("input", () => {
     statsNumericSearchValue = statsNumericSearch.value;
     renderStatsToolbar();
+    persistAppStateSoon();
   });
 }
 if (statsCategoricalSearch) {
   statsCategoricalSearch.addEventListener("input", () => {
     statsCategoricalSearchValue = statsCategoricalSearch.value;
     renderStatsToolbar();
+    persistAppStateSoon();
   });
 }
 if (statsSelectVisibleNumericButton) {
@@ -4181,6 +5475,7 @@ if (statsSelectVisibleNumericButton) {
     ]);
     renderStatsToolbar();
     renderStatsTable();
+    persistAppStateSoon();
   });
 }
 if (statsClearNumericButton) {
@@ -4188,6 +5483,7 @@ if (statsClearNumericButton) {
     selectedStatsColumns = [];
     renderStatsToolbar();
     renderStatsTable();
+    persistAppStateSoon();
   });
 }
 if (statsSelectVisibleCategoricalButton) {
@@ -4199,6 +5495,7 @@ if (statsSelectVisibleCategoricalButton) {
     ]);
     renderStatsToolbar();
     renderCategoricalSummary();
+    persistAppStateSoon();
   });
 }
 if (statsClearCategoricalButton) {
@@ -4206,36 +5503,42 @@ if (statsClearCategoricalButton) {
     selectedCategoricalStatsColumns = [];
     renderStatsToolbar();
     renderCategoricalSummary();
+    persistAppStateSoon();
   });
 }
 if (distVariableSelect) {
   distVariableSelect.addEventListener("change", () => {
     distributionColumn = distVariableSelect.value || null;
     renderDistributionView();
+    persistAppStateSoon();
   });
 }
 if (distSplitSelect) {
   distSplitSelect.addEventListener("change", () => {
     distributionSplitColumn = distSplitSelect.value || NONE_OPTION;
     renderDistributionView();
+    persistAppStateSoon();
   });
 }
 if (distViewSelect) {
   distViewSelect.addEventListener("change", () => {
     distributionViewMode = distViewSelect.value || "histogram";
     renderDistributionView();
+    persistAppStateSoon();
   });
 }
 if (distOverlaySelect) {
   distOverlaySelect.addEventListener("change", () => {
     distributionOverlayMode = distOverlaySelect.value || "none";
     renderDistributionView();
+    persistAppStateSoon();
   });
 }
 if (distNormalizationSelect) {
   distNormalizationSelect.addEventListener("change", () => {
     distributionNormalization = distNormalizationSelect.value || "density";
     renderDistributionView();
+    persistAppStateSoon();
   });
 }
 if (distBinSlider) {
@@ -4243,6 +5546,7 @@ if (distBinSlider) {
     distributionBinCount = Math.max(8, Math.min(80, Number(distBinSlider.value) || 24));
     updateDistributionBinLabel();
     renderDistributionView();
+    persistAppStateSoon();
   };
   distBinSlider.addEventListener("input", onBinChange);
   distBinSlider.addEventListener("change", onBinChange);
@@ -4269,11 +5573,106 @@ if (distViolinSaveButton) {
     download2DPlotImage("dist-violin-plot", `${safeDatasetStem()}_violin_${variable}`);
   });
 }
+if (outlierMethodSelect) {
+  outlierMethodSelect.addEventListener("change", () => {
+    outlierMethod = outlierMethodSelect.value || "iqr";
+    outlierThreshold = outlierMethodConfig(outlierMethod).defaultThreshold;
+    outlierSelectedRowIndex = null;
+    updateOutlierThresholdLabel();
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierIdSelect) {
+  outlierIdSelect.addEventListener("change", () => {
+    outlierIdColumn = outlierIdSelect.value || NONE_OPTION;
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierThresholdSlider) {
+  const onOutlierThresholdChange = () => {
+    outlierThreshold = normalizeThresholdForMethod(outlierMethod, Number(outlierThresholdSlider.value));
+    outlierSelectedRowIndex = null;
+    updateOutlierThresholdLabel();
+    renderOutlierView();
+    persistAppStateSoon();
+  };
+  outlierThresholdSlider.addEventListener("input", onOutlierThresholdChange);
+  outlierThresholdSlider.addEventListener("change", onOutlierThresholdChange);
+}
+if (outlierSearch) {
+  outlierSearch.addEventListener("input", () => {
+    outlierSearchValue = outlierSearch.value;
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierSelectVisibleButton) {
+  outlierSelectVisibleButton.addEventListener("click", () => {
+    if (!currentPayload) return;
+    outlierSelectedColumns = uniqueOrderedColumns([
+      ...outlierSelectedColumns,
+      ...filterColumnsByQuery(currentPayload.numeric_columns, outlierSearchValue),
+    ]);
+    outlierSelectedRowIndex = null;
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierClearColumnsButton) {
+  outlierClearColumnsButton.addEventListener("click", () => {
+    outlierSelectedColumns = [];
+    outlierFocusColumn = null;
+    outlierSelectedRowIndex = null;
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierFocusSelect) {
+  outlierFocusSelect.addEventListener("change", () => {
+    outlierFocusColumn = outlierFocusSelect.value !== NONE_OPTION ? outlierFocusSelect.value : null;
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierScatterXSelect) {
+  outlierScatterXSelect.addEventListener("change", () => {
+    setOutlierScatterAxis("x", outlierScatterXSelect.value);
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierScatterYSelect) {
+  outlierScatterYSelect.addEventListener("change", () => {
+    setOutlierScatterAxis("y", outlierScatterYSelect.value);
+    renderOutlierView();
+    persistAppStateSoon();
+  });
+}
+if (outlierScatterResetButton) {
+  outlierScatterResetButton.addEventListener("click", () => reset2DPlotZoom("outlier-scatter-plot"));
+}
+if (outlierScatterSaveButton) {
+  outlierScatterSaveButton.addEventListener("click", () => {
+    const analysis = computeOutlierAnalysis(currentPayload);
+    const [x, y] = analysis?.scatterColumns || ["x", "y"];
+    download2DPlotImage("outlier-scatter-plot", `${safeDatasetStem()}_outliers_${safeFilenamePart(x)}_vs_${safeFilenamePart(y)}`);
+  });
+}
+if (outlierHistSaveButton) {
+  outlierHistSaveButton.addEventListener("click", () => {
+    const analysis = computeOutlierAnalysis(currentPayload);
+    const focus = analysis?.focusColumn || "outliers";
+    download2DPlotImage("outlier-histogram-plot", `${safeDatasetStem()}_outlier_distribution_${safeFilenamePart(focus)}`);
+  });
+}
 if (transformLogHandling) {
   transformLogHandling.addEventListener("change", () => {
     if (!draftTransformConfig) return;
     draftTransformConfig.log.handling = transformLogHandling.value === "exclude" ? "exclude" : "missing";
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (addKeepRuleButton) {
@@ -4281,6 +5680,7 @@ if (addKeepRuleButton) {
     if (!sourcePayload || !draftTransformConfig) return;
     draftTransformConfig.keepRules = [...draftTransformConfig.keepRules, createTransformRule("keepRules")];
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (clearKeepRulesButton) {
@@ -4288,6 +5688,7 @@ if (clearKeepRulesButton) {
     if (!draftTransformConfig) return;
     draftTransformConfig.keepRules = [];
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (addExcludeRuleButton) {
@@ -4295,6 +5696,7 @@ if (addExcludeRuleButton) {
     if (!sourcePayload || !draftTransformConfig) return;
     draftTransformConfig.excludeRules = [...draftTransformConfig.excludeRules, createTransformRule("excludeRules")];
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (clearExcludeRulesButton) {
@@ -4302,6 +5704,7 @@ if (clearExcludeRulesButton) {
     if (!draftTransformConfig) return;
     draftTransformConfig.excludeRules = [];
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (transformResetButton) {
@@ -4309,6 +5712,7 @@ if (transformResetButton) {
     draftTransformConfig = cloneTransformConfig(appliedTransformConfig || defaultTransformConfig());
     clearError();
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (transformApplyButton) {
@@ -4323,35 +5727,53 @@ if (transformApplyButton) {
     appliedTransformConfig = cloneTransformConfig(draftTransformConfig);
     refreshActivePayload();
     renderTransformationView();
+    persistAppStateSoon();
   });
 }
 if (corrPairModeButton) {
-  corrPairModeButton.addEventListener("click", () => setCorrelationMode("pair"));
+  corrPairModeButton.addEventListener("click", () => {
+    setCorrelationMode("pair");
+    persistAppStateSoon();
+  });
 }
 if (corrMatrixModeButton) {
-  corrMatrixModeButton.addEventListener("click", () => setCorrelationMode("matrix"));
+  corrMatrixModeButton.addEventListener("click", () => {
+    setCorrelationMode("matrix");
+    persistAppStateSoon();
+  });
 }
 if (corrXSelect) {
-  corrXSelect.addEventListener("change", renderCorrelationPairExplorer);
+  corrXSelect.addEventListener("change", () => {
+    renderCorrelationPairExplorer();
+    persistAppStateSoon();
+  });
 }
 if (corrYSelect) {
-  corrYSelect.addEventListener("change", renderCorrelationPairExplorer);
+  corrYSelect.addEventListener("change", () => {
+    renderCorrelationPairExplorer();
+    persistAppStateSoon();
+  });
 }
 if (corrAlphaSlider) {
   const onAlphaChange = () => {
     updateCorrelationAlphaLabel();
     rerenderCorrelationScatterViews();
+    persistAppStateSoon();
   };
   corrAlphaSlider.addEventListener("input", onAlphaChange);
   corrAlphaSlider.addEventListener("change", onAlphaChange);
 }
 if (corrFitSelect) {
-  corrFitSelect.addEventListener("change", rerenderCorrelationScatterViews);
+  corrFitSelect.addEventListener("change", () => {
+    rerenderCorrelationScatterViews();
+    persistAppStateSoon();
+  });
 }
 if (corrMatrixMethod) {
   corrMatrixMethod.addEventListener("change", () => {
     focusedMatrixPair = null;
     renderCorrelationMatrixExplorer();
+    persistAppStateSoon();
   });
 }
 if (corrSelectAllButton) {
@@ -4360,6 +5782,7 @@ if (corrSelectAllButton) {
     selectedMatrixColumns = [...currentPayload.numeric_columns];
     focusedMatrixPair = null;
     renderCorrelationMatrixExplorer();
+    persistAppStateSoon();
   });
 }
 if (corrClearAllButton) {
@@ -4367,8 +5790,15 @@ if (corrClearAllButton) {
     selectedMatrixColumns = [];
     focusedMatrixPair = null;
     renderCorrelationMatrixExplorer();
+    persistAppStateSoon();
   });
 }
+window.addEventListener("message", (event) => {
+  if (event.source !== frame.contentWindow) return;
+  if (event.data?.type !== "statzooka-dashboard-state") return;
+  dashboardViewState = cloneDashboardViewState(event.data.state);
+  persistAppStateSoon();
+});
 if (corrPairResetButton) {
   corrPairResetButton.addEventListener("click", () => reset2DPlotZoom("corr-pair-plot"));
 }
@@ -4405,7 +5835,11 @@ form.addEventListener("submit", async (event) => {
 renderStatsTable();
 renderCategoricalSummary();
 renderDistributionView();
+renderOutlierView();
 updateCorrelationAlphaLabel();
 renderCorrelationView();
 renderTransformationView();
 initializeResponsivePlotObserver();
+if (!persistenceRestorePromise) {
+  persistenceRestorePromise = restorePersistedStateOnLoad();
+}
