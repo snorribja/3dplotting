@@ -244,6 +244,9 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
       gap: 16px;
       padding: 16px;
     }}
+    .shell > * {{
+      min-width: 0;
+    }}
     .controls {{
       background: linear-gradient(180deg, rgba(31, 33, 41, 0.96), rgba(21, 22, 28, 0.94));
       border: 1px solid var(--line);
@@ -322,7 +325,7 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
     }}
     .check-grid {{
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 10px;
     }}
     .check {{
@@ -413,6 +416,7 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
       font-size: 0.72rem;
     }}
     #plot {{
+      display: block;
       width: 100%;
       height: 100%;
       min-height: 0;
@@ -425,6 +429,14 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
       font-size: 0.84rem;
       line-height: 1.45;
       margin-top: 8px;
+    }}
+    @media (max-width: 1240px) {{
+      .shell {{
+        grid-template-columns: 340px minmax(0, 1fr);
+      }}
+      .controls {{
+        padding: 20px;
+      }}
     }}
     @media (max-width: 1080px) {{
       body {{
@@ -440,11 +452,34 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
         height: auto;
       }}
       #plot {{
-        height: 72vh;
-        min-height: 520px;
+        height: min(72vh, 680px);
+        min-height: 420px;
       }}
       .plot-header {{
         flex-direction: column;
+      }}
+    }}
+    @media (max-width: 720px) {{
+      .shell {{
+        padding: 12px;
+        gap: 12px;
+      }}
+      .controls,
+      .plot-area {{
+        border-radius: 24px;
+      }}
+      .controls {{
+        padding: 18px;
+      }}
+      #plot {{
+        height: min(64vh, 560px);
+        min-height: 340px;
+      }}
+      .stats {{
+        grid-template-columns: 1fr;
+      }}
+      .plot-note {{
+        white-space: normal;
       }}
     }}
   </style>
@@ -975,6 +1010,17 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
       sizeScaleValue.textContent = `${{Number(sizeScaleSlider.value).toFixed(1)}}x`;
     }}
 
+    function resizePlot() {{
+      if (typeof Plotly === "undefined" || !plotNode || !plotNode.data) {{
+        return;
+      }}
+      Plotly.Plots.resize(plotNode);
+    }}
+
+    function initializeResponsiveBehavior() {{
+      window.addEventListener("resize", resizePlot);
+    }}
+
     function initialize() {{
       titleNode.textContent = DATASET.title;
 
@@ -1002,6 +1048,7 @@ def _dashboard_html(*, payload_json: str, plotly_js: str) -> str:
       }});
 
       render();
+      initializeResponsiveBehavior();
     }}
 
     initialize();

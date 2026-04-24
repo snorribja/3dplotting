@@ -9,6 +9,8 @@ const dropzone = document.getElementById("dropzone");
 const dropzoneTitle = document.getElementById("dropzone-title");
 const dropzoneSubtitle = document.getElementById("dropzone-subtitle");
 const frame = document.getElementById("dashboard-frame");
+const viewerShell = document.querySelector(".viewer");
+const viewerStage = document.querySelector(".viewer-stage");
 const meta = document.getElementById("meta");
 const error = document.getElementById("error");
 const viewerContext = document.getElementById("viewer-context") || document.getElementById("viewer-title");
@@ -16,11 +18,11 @@ const clearButton = document.getElementById("clear-button");
 const prepImpact = document.getElementById("prep-impact");
 const prepSummaryGrid = document.getElementById("prep-summary-grid");
 const prepSummaryEmpty = document.getElementById("prep-summary-empty");
+const prepOpenButton = document.getElementById("prep-open-button");
 const emptyState = document.getElementById("empty-state");
 const loadingState = document.getElementById("loading-state");
 const loadingTitle = document.getElementById("loading-title");
 const dashboardTab = document.getElementById("dashboard-tab");
-const transformationTab = document.getElementById("transformation-tab");
 const statisticsTab = document.getElementById("statistics-tab");
 const distributionTab = document.getElementById("distribution-tab");
 const correlationTab = document.getElementById("correlation-tab");
@@ -127,6 +129,9 @@ let selectedMatrixColumns = [];
 let focusedMatrixPair = null;
 let currentMatrixPairLookup = new Map();
 let nextFilterRuleId = 1;
+let responsivePlotResizeFrame = 0;
+let responsivePlotObserver = null;
+const responsivePlotObservedSizes = new WeakMap();
 const SCALING_OPTIONS = [
   { value: "none", label: "No scaling" },
   { value: "standardize", label: "Standardize (z-score)" },
@@ -1069,6 +1074,9 @@ function renderPreviewTable(payload) {
 
 function renderPrepSummary(preview) {
   if (!prepImpact || !prepSummaryGrid || !prepSummaryEmpty) return;
+  if (prepOpenButton) {
+    prepOpenButton.classList.toggle("active", activeOuterView === "transformation");
+  }
   if (!sourcePayload || !currentPayload || !appliedTransformConfig) {
     prepImpact.textContent = "No dataset loaded";
     prepSummaryGrid.innerHTML = "";
@@ -1079,13 +1087,23 @@ function renderPrepSummary(preview) {
   prepImpact.textContent = `${currentPayload.records.length.toLocaleString()} rows | ${currentPayload.columns.length.toLocaleString()} cols`;
   const appliedPreview = preview || derivePreparedPayload(sourcePayload, appliedTransformConfig)?.preview;
   const items = [
-    scalingSummaryText(appliedTransformConfig, sourcePayload),
-    appliedTransformConfig.log.columns.length ? `${appliedTransformConfig.log.columns.length.toLocaleString()} log transform${appliedTransformConfig.log.columns.length === 1 ? "" : "s"}` : "No log transforms",
-    encodingSummaryText(appliedTransformConfig, sourcePayload),
-    appliedPreview?.keepValidRuleCount ? `${appliedPreview.keepValidRuleCount.toLocaleString()} subset rule${appliedPreview.keepValidRuleCount === 1 ? "" : "s"}` : "No subset rules",
-    appliedPreview?.excludeValidRuleCount ? `${appliedPreview.excludeValidRuleCount.toLocaleString()} exclusion rule${appliedPreview.excludeValidRuleCount === 1 ? "" : "s"}` : "No exclusion rules",
+    { label: "Pipeline status", value: activeOuterView === "transformation" ? "Open for editing" : "Applied to analysis views" },
+    { label: "Applied steps", value: [
+      scalingSummaryText(appliedTransformConfig, sourcePayload),
+      appliedTransformConfig.log.columns.length ? `${appliedTransformConfig.log.columns.length.toLocaleString()} log transform${appliedTransformConfig.log.columns.length === 1 ? "" : "s"}` : "No log transforms",
+      encodingSummaryText(appliedTransformConfig, sourcePayload),
+      appliedPreview?.keepValidRuleCount ? `${appliedPreview.keepValidRuleCount.toLocaleString()} subset rule${appliedPreview.keepValidRuleCount === 1 ? "" : "s"}` : "No subset rules",
+      appliedPreview?.excludeValidRuleCount ? `${appliedPreview.excludeValidRuleCount.toLocaleString()} exclusion rule${appliedPreview.excludeValidRuleCount === 1 ? "" : "s"}` : "No exclusion rules",
+    ].join(" | ") },
+    { label: "Prepared rows", value: currentPayload.records.length.toLocaleString() },
+    { label: "Prepared columns", value: currentPayload.columns.length.toLocaleString() },
   ];
-  prepSummaryGrid.innerHTML = items.map((item) => `<div class="prep-summary-item">${escapeHtml(item)}</div>`).join("");
+  prepSummaryGrid.innerHTML = items.map((item) => `
+    <div class="prep-summary-item">
+      <div class="prep-summary-label">${escapeHtml(item.label)}</div>
+      <div class="prep-summary-value">${escapeHtml(item.value)}</div>
+    </div>
+  `).join("");
 }
 
 function renderTransformationView() {
@@ -2618,6 +2636,50 @@ function resizeDistributionPlot() {
   });
 }
 
+function scheduleResponsivePlotResize() {
+  if (responsivePlotResizeFrame) {
+    cancelAnimationFrame(responsivePlotResizeFrame);
+  }
+  responsivePlotResizeFrame = requestAnimationFrame(() => {
+    responsivePlotResizeFrame = 0;
+    resizeDistributionPlot();
+    resizeCorrelationPlots();
+  });
+}
+
+function initializeResponsivePlotObserver() {
+  if (responsivePlotObserver || typeof ResizeObserver === "undefined") return;
+  responsivePlotObserver = new ResizeObserver((entries) => {
+    const hasMeaningfulContainerResize = entries.some(({ target, contentRect }) => {
+      const previous = responsivePlotObservedSizes.get(target);
+      const next = {
+        width: Math.round(contentRect.width),
+        height: Math.round(contentRect.height),
+      };
+      responsivePlotObservedSizes.set(target, next);
+      if (!previous) return false;
+      return previous.width !== next.width || previous.height !== next.height;
+    });
+
+    if (hasMeaningfulContainerResize) {
+      scheduleResponsivePlotResize();
+    }
+  });
+
+  [
+    viewerShell,
+    viewerStage,
+    distributionPanel,
+    correlationPanel,
+  ].filter(Boolean).forEach((node) => {
+    responsivePlotObservedSizes.set(node, {
+      width: Math.round(node.getBoundingClientRect().width),
+      height: Math.round(node.getBoundingClientRect().height),
+    });
+    responsivePlotObserver.observe(node);
+  });
+}
+
 function renderSingleDistributionPlot(targetId, traces, layout, emptyMessage) {
   const target = document.getElementById(targetId);
   if (!target) return;
@@ -2978,14 +3040,13 @@ function renderDistributionView() {
 
 function setOuterView(view) {
   activeOuterView = view;
-  if (!dashboardTab || !transformationTab || !statisticsTab || !distributionTab || !correlationTab || !dashboardPanel || !transformationPanel || !statisticsPanel || !distributionPanel || !correlationPanel) return;
+  if (!dashboardTab || !statisticsTab || !distributionTab || !correlationTab || !dashboardPanel || !transformationPanel || !statisticsPanel || !distributionPanel || !correlationPanel) return;
   const showDashboard = view === "dashboard";
   const showTransformation = view === "transformation";
   const showStatistics = view === "statistics";
   const showDistribution = view === "distribution";
   const showCorrelation = view === "correlation";
   dashboardTab.classList.toggle("active", showDashboard);
-  transformationTab.classList.toggle("active", showTransformation);
   statisticsTab.classList.toggle("active", showStatistics);
   distributionTab.classList.toggle("active", showDistribution);
   correlationTab.classList.toggle("active", showCorrelation);
@@ -2994,6 +3055,10 @@ function setOuterView(view) {
   statisticsPanel.classList.toggle("hidden", !showStatistics);
   distributionPanel.classList.toggle("hidden", !showDistribution);
   correlationPanel.classList.toggle("hidden", !showCorrelation);
+  if (emptyState) {
+    const shouldShowEmptyState = !sourcePayload && showDashboard;
+    emptyState.classList.toggle("hidden", !shouldShowEmptyState);
+  }
   if (showTransformation) {
     renderTransformationView();
   }
@@ -3012,6 +3077,7 @@ function setOuterView(view) {
       }
     }, 60);
   }
+  renderPrepSummary();
 }
 
 function normalizeValue(value) {
@@ -4014,12 +4080,14 @@ clearButton.addEventListener("click", () => {
   clearError();
 });
 
-if (dashboardTab && transformationTab && statisticsTab && distributionTab && correlationTab) {
+if (dashboardTab && statisticsTab && distributionTab && correlationTab) {
   dashboardTab.addEventListener("click", () => setOuterView("dashboard"));
-  transformationTab.addEventListener("click", () => setOuterView("transformation"));
   statisticsTab.addEventListener("click", () => setOuterView("statistics"));
   distributionTab.addEventListener("click", () => setOuterView("distribution"));
   correlationTab.addEventListener("click", () => setOuterView("correlation"));
+}
+if (prepOpenButton) {
+  prepOpenButton.addEventListener("click", () => setOuterView("transformation"));
 }
 if (statsNumericDownloadButton) {
   statsNumericDownloadButton.addEventListener("click", downloadNumericStatsCsv);
@@ -4261,15 +4329,7 @@ window.addEventListener("resize", () => {
   const categoricalColumns = categoricalColumnsForPayload(currentPayload)
     .filter((column) => selectedCategoricalStatsColumns.includes(column));
   updateCategoricalSheetHeight(categoricalColumns.length);
-  resizeDistributionPlot();
-  if (hasPlotly()) {
-    ["corr-pair-plot", "corr-matrix-heatmap", "corr-focus-plot"].forEach((id) => {
-      const node = document.getElementById(id);
-      if (node && node.data) {
-        Plotly.Plots.resize(node);
-      }
-    });
-  }
+  scheduleResponsivePlotResize();
 });
 
 form.addEventListener("submit", async (event) => {
@@ -4283,3 +4343,4 @@ renderDistributionView();
 updateCorrelationAlphaLabel();
 renderCorrelationView();
 renderTransformationView();
+initializeResponsivePlotObserver();
