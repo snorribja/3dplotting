@@ -189,8 +189,16 @@ const DISTRIBUTION_METRIC_EXPLANATIONS = {
   "IQR": "Interquartile range, calculated as Q3 minus Q1. It captures the middle 50% spread.",
   "Std Dev": "Standard deviation of the included values.",
 };
-const DISTRIBUTION_SINGLE_COLOR = "#ae5cff";
-const DISTRIBUTION_GROUP_COLORS = ["#ae5cff", "#38bdf8", "#f59e0b", "#34d399", "#fb7185", "#facc15", "#22d3ee", "#c084fc"];
+const DISTRIBUTION_SINGLE_COLOR = "#8f3dff";
+const DISTRIBUTION_GROUP_COLORS = ["#8f3dff", "#00c2ff", "#ff8a1f", "#22c55e", "#ff4d6d", "#facc15", "#14b8a6", "#7c5cff"];
+const DISTRIBUTION_PAPER_BG = "rgba(17, 19, 27, 0.94)";
+const DISTRIBUTION_PLOT_BG = "#141925";
+const DISTRIBUTION_GRID_COLOR = "rgba(148, 163, 184, 0.12)";
+const DISTRIBUTION_ZERO_LINE_COLOR = "rgba(148, 163, 184, 0.2)";
+const DISTRIBUTION_LEGEND_BG = "rgba(11, 14, 22, 0.88)";
+const DISTRIBUTION_LEGEND_BORDER = "rgba(143, 61, 255, 0.34)";
+const DISTRIBUTION_FONT_COLOR = "#eef2ff";
+const DISTRIBUTION_SECONDARY_FONT_COLOR = "#c7d2e5";
 
 function setViewerContext(text) {
   if (viewerContext) {
@@ -2732,7 +2740,7 @@ function renderDistributionPlotForSeries(series, valueColumn, splitColumn, mode,
         x: item.values,
         name,
         marker: { color, line: { width: 0 } },
-        opacity: splitColumn && splitColumn !== NONE_OPTION ? 0.58 : 0.82,
+        opacity: splitColumn && splitColumn !== NONE_OPTION ? 0.68 : 0.88,
         nbinsx: distributionBinCount,
         histnorm: overlayMode === "kde"
           ? "probability density"
@@ -2851,9 +2859,9 @@ function renderDistributionPlotForSeries(series, valueColumn, splitColumn, mode,
   });
 
   const layout = {
-    paper_bgcolor: "rgba(18, 20, 28, 0.92)",
-    plot_bgcolor: "#ffffff",
-    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: "#e8ebf4" },
+    paper_bgcolor: DISTRIBUTION_PAPER_BG,
+    plot_bgcolor: DISTRIBUTION_PLOT_BG,
+    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: DISTRIBUTION_FONT_COLOR },
     margin: { l: 60, r: yAxis2 ? 60 : 28, t: 28, b: 60 },
     barmode,
     legend: {
@@ -2862,31 +2870,31 @@ function renderDistributionPlotForSeries(series, valueColumn, splitColumn, mode,
       y: 1.02,
       xanchor: "left",
       x: 0,
-      bgcolor: "rgba(16, 18, 26, 0.84)",
-      bordercolor: "rgba(174, 92, 255, 0.28)",
+      bgcolor: DISTRIBUTION_LEGEND_BG,
+      bordercolor: DISTRIBUTION_LEGEND_BORDER,
       borderwidth: 1,
-      font: { color: "#e8ebf4" },
+      font: { color: DISTRIBUTION_FONT_COLOR },
     },
     xaxis: {
-      title: { text: mode === "box" || mode === "violin" ? (splitColumn && splitColumn !== NONE_OPTION ? splitColumn : "Distribution") : valueColumn, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
+      title: { text: mode === "box" || mode === "violin" ? (splitColumn && splitColumn !== NONE_OPTION ? splitColumn : "Distribution") : valueColumn, font: { color: DISTRIBUTION_FONT_COLOR, size: 13 }, standoff: 10 },
+      tickfont: { color: DISTRIBUTION_FONT_COLOR },
+      gridcolor: DISTRIBUTION_GRID_COLOR,
+      zerolinecolor: DISTRIBUTION_ZERO_LINE_COLOR,
     },
     yaxis: {
-      title: { text: yAxisTitle, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
+      title: { text: yAxisTitle, font: { color: DISTRIBUTION_FONT_COLOR, size: 13 }, standoff: 10 },
+      tickfont: { color: DISTRIBUTION_FONT_COLOR },
+      gridcolor: DISTRIBUTION_GRID_COLOR,
+      zerolinecolor: DISTRIBUTION_ZERO_LINE_COLOR,
       rangemode: "tozero",
     },
   };
   if (yAxis2) {
     layout.yaxis2 = {
       ...yAxis2,
-      tickfont: { color: "#cbd5e1" },
+      tickfont: { color: DISTRIBUTION_SECONDARY_FONT_COLOR },
       title: typeof yAxis2.title === "string"
-        ? { text: yAxis2.title, font: { color: "#cbd5e1", size: 13 } }
+        ? { text: yAxis2.title, font: { color: DISTRIBUTION_SECONDARY_FONT_COLOR, size: 13 } }
         : yAxis2.title,
       gridcolor: "rgba(0,0,0,0)",
       zerolinecolor: "rgba(0,0,0,0)",
@@ -2903,26 +2911,26 @@ function renderDistributionPlotForSeries(series, valueColumn, splitColumn, mode,
 
 function renderDistributionShapePlots(series, valueColumn, splitColumn) {
   const commonLayout = {
-    paper_bgcolor: "rgba(18, 20, 28, 0.92)",
-    plot_bgcolor: "#ffffff",
-    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: "#e8ebf4" },
+    paper_bgcolor: DISTRIBUTION_PAPER_BG,
+    plot_bgcolor: DISTRIBUTION_PLOT_BG,
+    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: DISTRIBUTION_FONT_COLOR },
     margin: { l: 56, r: 24, t: 26, b: 56 },
     showlegend: false,
     xaxis: {
       title: {
         text: splitColumn && splitColumn !== NONE_OPTION ? splitColumn : "Distribution",
-        font: { color: "#e8ebf4", size: 13 },
+        font: { color: DISTRIBUTION_FONT_COLOR, size: 13 },
         standoff: 10,
       },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
+      tickfont: { color: DISTRIBUTION_FONT_COLOR },
+      gridcolor: DISTRIBUTION_GRID_COLOR,
+      zerolinecolor: DISTRIBUTION_ZERO_LINE_COLOR,
     },
     yaxis: {
-      title: { text: valueColumn, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
+      title: { text: valueColumn, font: { color: DISTRIBUTION_FONT_COLOR, size: 13 }, standoff: 10 },
+      tickfont: { color: DISTRIBUTION_FONT_COLOR },
+      gridcolor: DISTRIBUTION_GRID_COLOR,
+      zerolinecolor: DISTRIBUTION_ZERO_LINE_COLOR,
     },
   };
 
