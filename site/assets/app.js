@@ -108,6 +108,8 @@ const outlierSummaryMetrics = document.getElementById("outlier-summary-metrics")
 const outlierFocusSelect = document.getElementById("outlier-focus-select");
 const outlierScatterXSelect = document.getElementById("outlier-scatter-x-select");
 const outlierScatterYSelect = document.getElementById("outlier-scatter-y-select");
+const outlierCreateRuleButton = document.getElementById("outlier-create-rule-button");
+const outlierRuleStatus = document.getElementById("outlier-rule-status");
 const outlierColumnSummary = document.getElementById("outlier-column-summary");
 const outlierRowSummary = document.getElementById("outlier-row-summary");
 const outlierColumnSheet = document.getElementById("outlier-column-sheet");
@@ -220,6 +222,7 @@ const FILTER_OPERATORS = {
     { value: "lte", label: "is at most" },
     { value: "between", label: "is between" },
     { value: "not_between", label: "is not between" },
+    { value: "outside_range", label: "is outside range" },
     { value: "is_missing", label: "is missing" },
     { value: "is_not_missing", label: "is not missing" },
   ],
@@ -801,7 +804,7 @@ function createFilterRule(payload = sourcePayload) {
 }
 
 function filterOperatorInputMode(operator) {
-  if (operator === "between" || operator === "not_between") return "range";
+  if (operator === "between" || operator === "not_between" || operator === "outside_range") return "range";
   if (operator === "is_missing" || operator === "is_not_missing") return "none";
   return "single";
 }
@@ -809,6 +812,7 @@ function filterOperatorInputMode(operator) {
 function valueLabelForRule(payload, rule, second = false) {
   const isNumeric = columnTypeForPayload(payload, rule.column) === "numeric";
   if (filterOperatorInputMode(rule.operator) === "range") {
+    if (rule.operator === "outside_range") return second ? "Maximum kept value" : "Minimum kept value";
     return second ? "Maximum value" : "Minimum value";
   }
   if (!isNumeric && (rule.operator === "in_list" || rule.operator === "not_in_list")) {
@@ -902,6 +906,7 @@ function rowMatchesFilterRule(row, rule, payload) {
     case "between":
       return numericValue !== null && firstValue !== null && secondValue !== null && numericValue >= Math.min(firstValue, secondValue) && numericValue <= Math.max(firstValue, secondValue);
     case "not_between":
+    case "outside_range":
       return numericValue !== null && firstValue !== null && secondValue !== null && (numericValue < Math.min(firstValue, secondValue) || numericValue > Math.max(firstValue, secondValue));
     case "contains":
       return textValue !== null && comparisonText !== null && textValue.includes(comparisonText);
@@ -940,8 +945,10 @@ function filterPreviewForRules(payload, rules, mode = "exclude") {
 
   const keepMatches = mode === "keep";
   const includedRecords = payload.records.filter((row) => {
-    const matchesAllRules = validRules.every((rule) => rowMatchesFilterRule(row, rule, payload));
-    return keepMatches ? matchesAllRules : !matchesAllRules;
+    const matchesRules = keepMatches
+      ? validRules.every((rule) => rowMatchesFilterRule(row, rule, payload))
+      : validRules.some((rule) => rowMatchesFilterRule(row, rule, payload));
+    return keepMatches ? matchesRules : !matchesRules;
   });
   return {
     includedRecords,
@@ -1450,7 +1457,7 @@ function renderRuleBuilder({ container, emptyNode, rules, labelText, operatorTex
       ? " Use commas to enter multiple values."
       : "";
     help.textContent = validateFilterRule(rule, sourcePayload)
-      ? `${helperText}${multiValueHint}`
+      ? `${rule.generatedFromOutliers ? "Generated from outlier review. Remove this rule if it should not be used. " : ""}${helperText}${multiValueHint}`
       : `Complete this rule to include it in the preview.${multiValueHint}`;
 
     wrapper.append(header, grid, help);
@@ -1656,7 +1663,7 @@ function renderTransformationView() {
     rules: draftTransformConfig.excludeRules,
     labelText: "Exclusion Rule",
     operatorText: "Exclude rows when",
-    helperText: "Rows matching this rule and the other exclusion rules are removed from the prepared dataset.",
+    helperText: "Rows matching this rule or another exclusion rule are removed from the prepared dataset.",
     group: "excludeRules",
   });
 
@@ -3691,6 +3698,8 @@ function outlierSummaryForColumn(payload, column, method, threshold) {
   if (method === "zscore") {
     center = meanValue(values);
     spread = standardDeviation(values);
+    lowerBound = center !== null && spread !== null ? center - (threshold * spread) : null;
+    upperBound = center !== null && spread !== null ? center + (threshold * spread) : null;
     ruleLabel = `|z| > ${threshold.toFixed(2)}`;
     if (spread !== null && spread > 0) {
       indexedValues.forEach(({ index, value }) => {
@@ -3702,6 +3711,8 @@ function outlierSummaryForColumn(payload, column, method, threshold) {
     center = medianValue(values);
     const deviations = values.map((value) => Math.abs(value - center)).sort((left, right) => left - right);
     spread = medianValue(deviations);
+    lowerBound = center !== null && spread !== null ? center - ((threshold * spread) / 0.6745) : null;
+    upperBound = center !== null && spread !== null ? center + ((threshold * spread) / 0.6745) : null;
     ruleLabel = `|modified z| > ${threshold.toFixed(2)}`;
     if (spread !== null && spread > 0) {
       indexedValues.forEach(({ index, value }) => {
@@ -3871,6 +3882,125 @@ function setSelectedOutlierRow(index) {
   persistAppStateSoon();
 }
 
+function focusedOutlierSummary(analysis) {
+  if (!analysis?.focusColumn) return null;
+  return analysis.columnSummaries.find((summary) => summary.column === analysis.focusColumn) || null;
+}
+
+function columnHasAppliedValueTransform(column) {
+  if (!appliedTransformConfig || !column) return false;
+  const scaled = appliedTransformConfig.scaling?.mode !== "none"
+    && appliedTransformConfig.scaling?.columns?.includes(column);
+  const logged = appliedTransformConfig.log?.columns?.includes(column);
+  return Boolean(scaled || logged);
+}
+
+function canCreateOutlierRangeRule(analysis) {
+  const summary = focusedOutlierSummary(analysis);
+  return Boolean(
+    sourcePayload
+    && draftTransformConfig
+    && summary
+    && sourcePayload.numeric_columns.includes(summary.column)
+    && summary.flaggedCount > 0
+    && summary.lowerBound !== null
+    && summary.upperBound !== null
+    && !columnHasAppliedValueTransform(summary.column),
+  );
+}
+
+function focusedOutlierRows(analysis, summary) {
+  if (!analysis?.flaggedRows?.length || !summary) return [];
+  return analysis.flaggedRows.filter((entry) => (
+    entry.flaggedColumns.some((item) => item.column === summary.column)
+  ));
+}
+
+function canCreateOutlierIdRule(analysis) {
+  const summary = focusedOutlierSummary(analysis);
+  const rows = focusedOutlierRows(analysis, summary);
+  return Boolean(
+    sourcePayload
+    && draftTransformConfig
+    && currentPayload
+    && summary
+    && outlierIdColumn
+    && outlierIdColumn !== NONE_OPTION
+    && sourcePayload.columns.includes(outlierIdColumn)
+    && currentPayload.columns.includes(outlierIdColumn)
+    && rows.some((entry) => normalizeValue(entry.row[outlierIdColumn]) !== null),
+  );
+}
+
+function createOutlierRangeRule(summary) {
+  return {
+    id: nextFilterRuleId++,
+    column: summary.column,
+    operator: "outside_range",
+    value: String(summary.lowerBound),
+    value2: String(summary.upperBound),
+    generatedFromOutliers: {
+      method: summary.method,
+      threshold: summary.threshold,
+      flaggedCount: summary.flaggedCount,
+    },
+  };
+}
+
+function createOutlierIdRule(analysis, summary) {
+  const values = [...new Set(
+    focusedOutlierRows(analysis, summary)
+      .map((entry) => normalizeValue(entry.row[outlierIdColumn]))
+      .filter((value) => value !== null)
+      .map((value) => String(value)),
+  )];
+  return {
+    id: nextFilterRuleId++,
+    column: outlierIdColumn,
+    operator: columnTypeForPayload(sourcePayload, outlierIdColumn) === "numeric" ? "eq" : "in_list",
+    value: values.join(", "),
+    value2: "",
+    generatedFromOutliers: {
+      method: summary.method,
+      threshold: summary.threshold,
+      flaggedCount: values.length,
+      sourceColumn: summary.column,
+    },
+  };
+}
+
+function addOutlierExclusionRule() {
+  const analysis = computeOutlierAnalysis(currentPayload);
+  const summary = focusedOutlierSummary(analysis);
+  if (!summary || !draftTransformConfig) return;
+  let nextRule = null;
+  if (canCreateOutlierIdRule(analysis)) {
+    nextRule = createOutlierIdRule(analysis, summary);
+  } else if (canCreateOutlierRangeRule(analysis)) {
+    nextRule = createOutlierRangeRule(summary);
+  }
+  if (!nextRule) {
+    if (outlierRuleStatus) {
+      outlierRuleStatus.textContent = columnHasAppliedValueTransform(summary.column)
+        ? "This focused column has an applied log or scaling transform. Select a row label column to generate an ID-based exclusion rule."
+        : "No removable outlier rule is available for the focused column.";
+    }
+    return;
+  }
+
+  draftTransformConfig.excludeRules = [
+    ...draftTransformConfig.excludeRules,
+    nextRule,
+  ];
+  activePrepView = "transform";
+  clearError();
+  renderTransformationView();
+  if (outlierRuleStatus) {
+    outlierRuleStatus.textContent = `Added an editable exclusion rule for ${summary.column}. Remove it from Exclusion Rules if you do not want to use it.`;
+  }
+  persistAppStateSoon();
+}
+
 function renderOutlierReviewControls(analysis) {
   const selectedColumns = analysis?.selectedColumns || [];
   const numericColumns = currentPayload?.numeric_columns || [];
@@ -3911,6 +4041,25 @@ function renderOutlierReviewControls(analysis) {
       const visibleCount = Math.min(OUTLIER_ROW_TABLE_LIMIT, analysis.flaggedRows.length);
       const selectedPrefix = analysis.selectedRow ? `${analysis.selectedRow.label} pinned. ` : "";
       outlierRowSummary.textContent = `${selectedPrefix}Showing top ${visibleCount.toLocaleString()} of ${analysis.flaggedRows.length.toLocaleString()} flagged rows. Click a row to highlight it in the charts.`;
+    }
+  }
+  if (outlierCreateRuleButton) {
+    const summary = focusedOutlierSummary(analysis);
+    outlierCreateRuleButton.disabled = !canCreateOutlierRangeRule(analysis) && !canCreateOutlierIdRule(analysis);
+    outlierCreateRuleButton.textContent = summary?.column ? `Add ${summary.column} Exclusion Rule` : "Add Exclusion Rule";
+  }
+  if (outlierRuleStatus) {
+    const summary = focusedOutlierSummary(analysis);
+    if (!summary || !selectedColumns.length) {
+      outlierRuleStatus.textContent = "";
+    } else if (!summary.flaggedCount) {
+      outlierRuleStatus.textContent = "The focused column has no flagged rows at the current threshold.";
+    } else if (canCreateOutlierIdRule(analysis)) {
+      outlierRuleStatus.textContent = `Creates an editable ID-list Exclusion Rule for rows flagged in ${summary.column}.`;
+    } else if (columnHasAppliedValueTransform(summary.column)) {
+      outlierRuleStatus.textContent = "Range rules are disabled for transformed columns. Select a row label column to generate an ID-based rule.";
+    } else {
+      outlierRuleStatus.textContent = `Creates an editable Exclusion Rule using ${summary.ruleLabel}.`;
     }
   }
 }
@@ -5666,6 +5815,9 @@ if (outlierHistSaveButton) {
     const focus = analysis?.focusColumn || "outliers";
     download2DPlotImage("outlier-histogram-plot", `${safeDatasetStem()}_outlier_distribution_${safeFilenamePart(focus)}`);
   });
+}
+if (outlierCreateRuleButton) {
+  outlierCreateRuleButton.addEventListener("click", addOutlierExclusionRule);
 }
 if (transformLogHandling) {
   transformLogHandling.addEventListener("change", () => {

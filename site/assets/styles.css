@@ -1731,6 +1731,16 @@ iframe {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 0;
 }
+.outlier-rule-actions {
+  margin-top: 12px;
+}
+.outlier-rule-status {
+  min-height: 18px;
+  margin-top: 8px;
+  color: #aab3c5;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
 .outlier-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

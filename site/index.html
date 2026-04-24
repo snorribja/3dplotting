@@ -219,14 +219,14 @@
                       <details class="transform-accordion">
                         <summary class="transform-accordion-summary">
                           <span class="transform-accordion-title">Exclusion Rules</span>
-                          <span class="transform-accordion-meta">Remove rows that match every exclusion rule</span>
+                          <span class="transform-accordion-meta">Remove rows that match any exclusion rule</span>
                         </summary>
                         <div class="transform-accordion-panel">
                           <div class="stats-control-panel">
                             <div class="stats-control-header">
                               <div>
                                 <div class="stats-control-title">Exclusion Rules</div>
-                                <div class="stats-control-subtitle">Exclude rows that match every rule below, similar to the existing filter workflow.</div>
+                                <div class="stats-control-subtitle">Exclude rows that match any rule below, similar to the existing filter workflow.</div>
                               </div>
                               <div class="stats-control-actions">
                                 <button class="stats-control-action" id="add-exclude-rule-button" type="button">Add Exclusion Rule</button>
@@ -332,6 +332,10 @@
                           <select id="outlier-scatter-y-select"></select>
                         </div>
                       </div>
+                      <div class="stats-control-actions outlier-rule-actions">
+                        <button class="stats-control-action" id="outlier-create-rule-button" type="button">Add Exclusion Rule</button>
+                      </div>
+                      <div class="outlier-rule-status" id="outlier-rule-status"></div>
                     </div>
                     <div class="outlier-section-header">
                       <div class="outlier-section-title">Column Summary</div>
