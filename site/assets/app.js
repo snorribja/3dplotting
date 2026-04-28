@@ -272,15 +272,15 @@ const DISTRIBUTION_METRIC_EXPLANATIONS = {
   "IQR": "Interquartile range, calculated as Q3 minus Q1. It captures the middle 50% spread.",
   "Sample Std Dev": "Sample standard deviation of the included values, calculated with n - 1.",
 };
-const DISTRIBUTION_SINGLE_COLOR = "#8f3dff";
-const DISTRIBUTION_GROUP_COLORS = ["#8f3dff", "#00c2ff", "#ff8a1f", "#22c55e", "#ff4d6d", "#facc15", "#14b8a6", "#7c5cff"];
-const DISTRIBUTION_LINE_COLORS = ["#f8fafc", "#ffe066", "#8ae1ff", "#c6ff8f", "#ffb0c0", "#fff1a8", "#98f5e1", "#d6ccff"];
+const DISTRIBUTION_SINGLE_COLOR = "#3b82f6";
+const DISTRIBUTION_GROUP_COLORS = ["#3b82f6", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#22c55e", "#ec4899", "#64748b"];
+const DISTRIBUTION_LINE_COLORS = ["#dbeafe", "#99f6e4", "#fde68a", "#fecaca", "#ddd6fe", "#bbf7d0", "#fbcfe8", "#cbd5e1"];
 const DISTRIBUTION_PAPER_BG = "rgba(17, 19, 27, 0.94)";
 const DISTRIBUTION_PLOT_BG = "#141925";
 const DISTRIBUTION_GRID_COLOR = "rgba(148, 163, 184, 0.12)";
 const DISTRIBUTION_ZERO_LINE_COLOR = "rgba(148, 163, 184, 0.2)";
 const DISTRIBUTION_LEGEND_BG = "rgba(11, 14, 22, 0.88)";
-const DISTRIBUTION_LEGEND_BORDER = "rgba(143, 61, 255, 0.34)";
+const DISTRIBUTION_LEGEND_BORDER = "rgba(96, 165, 250, 0.34)";
 const DISTRIBUTION_FONT_COLOR = "#eef2ff";
 const DISTRIBUTION_SECONDARY_FONT_COLOR = "#c7d2e5";
 
@@ -475,6 +475,7 @@ function applyPersistedFileMeta(fileName, fileSize = null) {
   } else {
     dropzoneSubtitle.textContent = "Restored from your previous session.";
   }
+  setClearButtonVisibility(true);
 }
 
 function resetApplicationState() {
@@ -643,14 +644,25 @@ function setLoading(isLoading, title = "Loading dashboard...") {
   }
 }
 
+function setClearButtonVisibility(isVisible) {
+  if (!clearButton) return;
+  clearButton.classList.toggle("visible", Boolean(isVisible));
+  const actionGroup = clearButton.closest(".actions");
+  if (actionGroup) {
+    actionGroup.classList.toggle("visible", Boolean(isVisible));
+  }
+}
+
 function setSelectedFile(file) {
   if (!file) {
     dropzoneTitle.textContent = "Drag a CSV here";
     dropzoneSubtitle.textContent = "Drop it in or click to browse from your machine.";
+    setClearButtonVisibility(false);
     return;
   }
   dropzoneTitle.textContent = file.name;
   dropzoneSubtitle.textContent = `${(file.size / 1024).toFixed(1)} KB selected`;
+  setClearButtonVisibility(true);
 }
 
 async function loadSelectedCsv() {
@@ -2984,7 +2996,7 @@ function renderPairScatterPlot(xColumn, yColumn, aligned, summary, targetId, reg
     x: aligned.xValues,
     y: aligned.yValues,
     marker: {
-      color: "#8d34ea",
+      color: "#3b82f6",
       size: 8,
       opacity: currentCorrelationPointOpacity(),
       line: { width: 0 },
@@ -3010,62 +3022,41 @@ function renderPairScatterPlot(xColumn, yColumn, aligned, summary, targetId, reg
   }
 
   target.innerHTML = "";
-  const fitText = resolvedRegression
-    ? `${resolvedRegression.label} fit | ${resolvedRegression.equationText} | R²: ${formatCorrelationValue(resolvedRegression.rSquared)}`
-    : "No trendline selected";
-  const corrText = `Pearson: ${formatCorrelationValue(summary.pearson)} | Spearman: ${formatCorrelationValue(summary.spearman)} | N: ${summary.n.toLocaleString()}`;
-
   let renderPromise;
   try {
     renderPromise = Plotly.newPlot(targetId, traces, {
-    paper_bgcolor: "rgba(18, 20, 28, 0.92)",
-    plot_bgcolor: "#ffffff",
-    font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: "#e8ebf4" },
-    margin: { l: 54, r: 20, t: 56, b: 50 },
-    legend: {
-      orientation: "h",
-      yanchor: "bottom",
-      y: 1.01,
-      xanchor: "left",
-      x: 0,
-      bgcolor: "rgba(16, 18, 26, 0.84)",
-      bordercolor: "rgba(174, 92, 255, 0.28)",
-      borderwidth: 1,
-      font: { color: "#e8ebf4" },
-    },
-    xaxis: {
-	      title: { text: `X: ${xLabel}`, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
-    },
-    yaxis: {
-	      title: { text: `Y: ${yLabel}`, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
-      tickfont: { color: "#e8ebf4" },
-      gridcolor: "rgba(16, 33, 50, 0.16)",
-      zerolinecolor: "rgba(16, 33, 50, 0.2)",
-    },
-    annotations: [{
-      xref: "paper",
-      yref: "paper",
-      x: 0.01,
-      y: 0.995,
-      xanchor: "left",
-      yanchor: "top",
-      align: "left",
-      showarrow: false,
-      text: `${fitText}<br>${corrText}`,
-      font: { size: 12, color: "#e8ebf4" },
-      bgcolor: "rgba(16, 18, 26, 0.84)",
-      bordercolor: "rgba(174, 92, 255, 0.28)",
-      borderwidth: 1,
-      borderpad: 6,
-    }],
-  }, {
-    responsive: true,
-    displaylogo: false,
-    modeBarButtonsToRemove: ["lasso2d", "select2d"],
-  });
+      paper_bgcolor: "rgba(18, 20, 28, 0.92)",
+      plot_bgcolor: "#111827",
+      font: { family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif', color: "#e8ebf4" },
+      margin: { l: 54, r: 20, t: 24, b: 50 },
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.01,
+        xanchor: "left",
+        x: 0,
+        bgcolor: "rgba(16, 18, 26, 0.84)",
+        bordercolor: "rgba(96, 165, 250, 0.28)",
+        borderwidth: 1,
+        font: { color: "#e8ebf4" },
+      },
+      xaxis: {
+        title: { text: `X: ${xLabel}`, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
+        tickfont: { color: "#e8ebf4" },
+        gridcolor: "rgba(148, 163, 184, 0.18)",
+        zerolinecolor: "rgba(148, 163, 184, 0.24)",
+      },
+      yaxis: {
+        title: { text: `Y: ${yLabel}`, font: { color: "#e8ebf4", size: 13 }, standoff: 10 },
+        tickfont: { color: "#e8ebf4" },
+        gridcolor: "rgba(148, 163, 184, 0.18)",
+        zerolinecolor: "rgba(148, 163, 184, 0.24)",
+      },
+    }, {
+      responsive: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ["lasso2d", "select2d"],
+    });
   } catch (error) {
     renderCorrelationEmpty(target, "Could not render this scatter plot for the selected variables.");
     return;
@@ -3163,7 +3154,8 @@ function renderCorrelationToggles() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "corr-toggle" + (selectedMatrixColumns.includes(column) ? " active" : "");
-    button.textContent = column;
+    button.textContent = currentDisplayNameForColumn(column);
+    button.title = currentDisplayNameForColumn(column);
     button.addEventListener("click", () => {
       if (selectedMatrixColumns.includes(column)) {
         selectedMatrixColumns = selectedMatrixColumns.filter((value) => value !== column);
@@ -3244,6 +3236,7 @@ function renderCorrelationMatrixExplorer() {
     renderCorrelationEmpty(corrMatrixHeatmap, "Plotly is not loaded, so charts are unavailable.");
   } else {
     corrMatrixHeatmap.innerHTML = "";
+    corrMatrixHeatmap.style.width = "";
     const matrixLabels = selectedMatrixColumns.map((column) => currentDisplayNameForColumn(column));
     const matrixCustomData = selectedMatrixColumns.map((yColumn) => (
       selectedMatrixColumns.map((xColumn) => [xColumn, yColumn])
@@ -3257,12 +3250,14 @@ function renderCorrelationMatrixExplorer() {
       zmin: -1,
       zmax: 1,
       colorscale: [
-        [0, "#3b0f70"],
-        [0.25, "#6c2ab9"],
+        [0, "#7f1d1d"],
+        [0.25, "#ef4444"],
         [0.5, "#f8fafc"],
-        [0.75, "#41b6c4"],
-        [1, "#1f8a70"],
+        [0.75, "#38bdf8"],
+        [1, "#1d4ed8"],
       ],
+      xgap: 1,
+      ygap: 1,
       colorbar: {
         title: method === "spearman" ? "Spearman" : "Pearson",
         tickcolor: "#a8b0c0",
@@ -4740,13 +4735,6 @@ function setOuterView(view) {
   } else if (showCorrelation) {
     renderCorrelationView();
     setTimeout(() => resizeCorrelationPlots(), 0);
-    setTimeout(() => {
-      if (correlationMode === "pair") {
-        renderCorrelationPairExplorer();
-      } else {
-        renderCorrelationMatrixExplorer();
-      }
-    }, 60);
   }
   renderPrepSummary();
   persistAppStateSoon();
@@ -4944,7 +4932,7 @@ function renderInfoTooltipLabel(label, description, className = "stats-term-head
   const safeLabel = escapeHtml(String(label));
   const safeDescription = escapeHtmlAttribute(description);
   const safeAriaLabel = escapeHtmlAttribute(`Info about ${label}`);
-  return `<span class="${escapeHtmlAttribute(className)}">${safeLabel}<button type="button" class="stats-term-info" aria-label="${safeAriaLabel}" data-tooltip="${safeDescription}">i</button></span>`;
+  return `<span class="${escapeHtmlAttribute(className)}">${safeLabel}<button type="button" class="stats-term-info" aria-label="${safeAriaLabel}" title="${safeDescription}" data-tooltip="${safeDescription}">i</button></span>`;
 }
 
 function buildDashboardHtml(payload, persistedViewState = null) {
@@ -4964,14 +4952,14 @@ function buildDashboardHtml(payload, persistedViewState = null) {
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #131418;
-      --panel: rgba(29, 31, 39, 0.82);
-      --ink: #f3f4f7;
-      --muted: #9197a8;
-      --line: rgba(86, 74, 104, 0.38);
-      --accent: #ae5cff;
-      --accent-soft: #8d34ea;
-      --shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+      --bg: #0f1218;
+      --panel: rgba(24, 28, 38, 0.92);
+      --ink: #f5f7fb;
+      --muted: #9aa4b5;
+      --line: rgba(119, 132, 154, 0.24);
+      --accent: #7c3aed;
+      --accent-2: #2563eb;
+      --shadow: 0 18px 42px rgba(0, 0, 0, 0.3);
     }
     * { box-sizing: border-box; }
     body {
@@ -4980,10 +4968,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       min-height: 100dvh;
       overflow: hidden;
       font-family: "Inter", "Segoe UI Variable", "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(174, 92, 255, 0.18), transparent 22%),
-        radial-gradient(circle at 85% 12%, rgba(141, 52, 234, 0.18), transparent 22%),
-        linear-gradient(180deg, #131418 0%, #17181d 50%, #131418 100%);
+      background: linear-gradient(180deg, #0f1218 0%, #131720 52%, #0f1218 100%);
       color: var(--ink);
     }
     .shell {
@@ -4997,7 +4982,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     .controls {
       background: linear-gradient(180deg, rgba(31, 33, 41, 0.96), rgba(21, 22, 28, 0.94));
       border: 1px solid var(--line);
-      border-radius: 28px;
+      border-radius: 16px;
       box-shadow: var(--shadow);
       padding: 24px;
       overflow-y: auto;
@@ -5007,7 +4992,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     .plot-area {
       background: linear-gradient(180deg, rgba(27, 28, 36, 0.94), rgba(18, 19, 24, 0.98));
       border: 1px solid var(--line);
-      border-radius: 28px;
+      border-radius: 16px;
       box-shadow: var(--shadow);
       padding: 14px;
       height: calc(100vh - 32px);
@@ -5021,7 +5006,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       margin: 0 0 10px 0;
       font-size: 1.7rem;
       line-height: 1;
-      letter-spacing: -0.04em;
+      letter-spacing: 0;
       font-family: "Syne", "Inter", sans-serif;
     }
     .subtle {
@@ -5035,7 +5020,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       margin-bottom: 18px;
       padding: 16px;
       border: 1px solid var(--line);
-      border-radius: 20px;
+      border-radius: 8px;
       background: rgba(24, 26, 33, 0.9);
     }
     .group-title {
@@ -5058,7 +5043,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     input[type="range"] { accent-color: var(--accent); }
     select {
       padding: 12px 14px;
-      border-radius: 16px;
+      border-radius: 8px;
       border: 1px solid rgba(86, 74, 104, 0.7);
       background: rgba(16, 17, 22, 0.78);
       color: var(--ink);
@@ -5100,7 +5085,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     }
     .stat {
       padding: 14px;
-      border-radius: 16px;
+      border-radius: 8px;
       background: rgba(16, 17, 22, 0.78);
       border: 1px solid var(--line);
     }
@@ -5130,7 +5115,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     .plot-title {
       font-size: 1.05rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: 0;
     }
     .plot-note {
       color: var(--muted);
@@ -5140,23 +5125,32 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       white-space: nowrap;
     }
     .corr-small-button {
-      border: 1px solid rgba(174, 92, 255, 0.28);
-      background: rgba(174, 92, 255, 0.12);
-      color: #f4e8ff;
-      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid rgba(37, 99, 235, 0.34);
+      background: rgba(37, 99, 235, 0.14);
+      color: #dbeafe;
+      border-radius: 8px;
       padding: 9px 13px;
       font-size: 0.72rem;
       font-weight: 700;
-      letter-spacing: 0.11em;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
       cursor: pointer;
       transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
     }
     .corr-small-button:hover {
       transform: translateY(-1px);
-      border-color: rgba(174, 92, 255, 0.48);
-      background: rgba(174, 92, 255, 0.2);
-      color: #fff8ff;
+      border-color: rgba(96, 165, 250, 0.48);
+      background: rgba(37, 99, 235, 0.22);
+      color: #fff;
+    }
+    .corr-small-button::before {
+      content: "↓";
+      font-size: 0.85rem;
+      line-height: 1;
     }
     .axis-pills {
       display: flex;
@@ -5169,10 +5163,10 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       align-items: center;
       gap: 6px;
       padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(174, 92, 255, 0.1);
-      border: 1px solid rgba(174, 92, 255, 0.14);
-      color: #f2e8ff;
+      border-radius: 8px;
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(96, 165, 250, 0.18);
+      color: #dbeafe;
       font-size: 0.8rem;
     }
     .axis-pill-label {
@@ -5186,9 +5180,9 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       width: 100%;
       height: 100%;
       min-height: 0;
-      border: 1px solid rgba(86, 74, 104, 0.32);
-      border-radius: 22px;
-      background: #ffffff;
+      border: 1px solid rgba(119, 132, 154, 0.24);
+      border-radius: 12px;
+      background: #111827;
     }
     .small-note {
       color: var(--muted);
@@ -5292,9 +5286,9 @@ function buildDashboardHtml(payload, persistedViewState = null) {
     const DATASET = ${payloadJson};
     const INITIAL_STATE = ${persistedViewStateJson};
     const DEFAULT_DISCRETE_COLORS = [
-      "#ae5cff", "#8d34ea", "#6d28d9", "#c084fc", "#7c3aed",
-      "#a855f7", "#d8b4fe", "#8b5cf6", "#4c1d95", "#e9d5ff",
-      "#9333ea", "#c026d3", "#581c87", "#7e22ce", "#f5f3ff"
+      "#3b82f6", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6",
+      "#22c55e", "#ec4899", "#64748b", "#06b6d4", "#f97316",
+      "#a855f7", "#84cc16", "#eab308", "#0ea5e9", "#f43f5e"
     ];
 
     const xSelect = document.getElementById("x-column");
@@ -5525,11 +5519,11 @@ function buildDashboardHtml(payload, persistedViewState = null) {
       const yTitle = logY.checked ? "log10(" + displayColumnName(yColumn) + ")" : displayColumnName(yColumn);
       const zTitle = logZ.checked ? "log10(" + displayColumnName(zColumn) + ")" : displayColumnName(zColumn);
       return {
-        paper_bgcolor: "#ffffff",
-        plot_bgcolor: "#ffffff",
+        paper_bgcolor: "#111827",
+        plot_bgcolor: "#111827",
         font: {
           family: '"Inter", "Segoe UI Variable", "Segoe UI", sans-serif',
-          color: "#102132",
+          color: "#e5e7eb",
         },
         margin: { l: 24, r: 24, t: 28, b: 24 },
         legend: {
@@ -5538,37 +5532,39 @@ function buildDashboardHtml(payload, persistedViewState = null) {
           y: 1.01,
           xanchor: "left",
           x: 0,
-          bgcolor: "rgba(0,0,0,0)",
-          font: { color: "#102132" },
+          bgcolor: "rgba(17, 24, 39, 0.86)",
+          bordercolor: "rgba(96, 165, 250, 0.24)",
+          borderwidth: 1,
+          font: { color: "#e5e7eb" },
         },
         scene: {
           xaxis: {
             title: { text: xTitle },
-            backgroundcolor: "#ffffff",
-            gridcolor: "rgba(16, 33, 50, 0.28)",
-            zerolinecolor: "rgba(16, 33, 50, 0.22)",
+            backgroundcolor: "#111827",
+            gridcolor: "rgba(148, 163, 184, 0.22)",
+            zerolinecolor: "rgba(148, 163, 184, 0.28)",
             showbackground: true,
-            color: "#102132",
+            color: "#e5e7eb",
             gridwidth: 2,
             zerolinewidth: 2,
           },
           yaxis: {
             title: { text: yTitle },
-            backgroundcolor: "#ffffff",
-            gridcolor: "rgba(16, 33, 50, 0.28)",
-            zerolinecolor: "rgba(16, 33, 50, 0.22)",
+            backgroundcolor: "#111827",
+            gridcolor: "rgba(148, 163, 184, 0.22)",
+            zerolinecolor: "rgba(148, 163, 184, 0.28)",
             showbackground: true,
-            color: "#102132",
+            color: "#e5e7eb",
             gridwidth: 2,
             zerolinewidth: 2,
           },
           zaxis: {
             title: { text: zTitle },
-            backgroundcolor: "#ffffff",
-            gridcolor: "rgba(16, 33, 50, 0.28)",
-            zerolinecolor: "rgba(16, 33, 50, 0.22)",
+            backgroundcolor: "#111827",
+            gridcolor: "rgba(148, 163, 184, 0.22)",
+            zerolinecolor: "rgba(148, 163, 184, 0.28)",
             showbackground: true,
-            color: "#102132",
+            color: "#e5e7eb",
             gridwidth: 2,
             zerolinewidth: 2,
           },
@@ -5592,7 +5588,7 @@ function buildDashboardHtml(payload, persistedViewState = null) {
         marker: {
           size: markerSizes,
           opacity: Number(opacitySlider.value),
-          color: "#8d34ea",
+          color: "#3b82f6",
           line: { width: 0 },
         },
       }];

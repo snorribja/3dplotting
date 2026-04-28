@@ -28,20 +28,27 @@
       "description": "Browser-based CSV exploration with 3D charts, descriptive statistics, distributions, correlations, and outlier diagnostics."
     }
   </script>
-  <link rel="stylesheet" href="./assets/styles.css?v=20260424-34" />
+  <link rel="stylesheet" href="./assets/styles.css?v=20260427-ui" />
 </head>
 <body>
   <div class="shell">
     <!-- Upload controls -->
     <section class="panel">
-      <div class="eyebrow">CSV to Website</div>
-      <h1>Drop in a file. Use the dashboard.</h1>
-      <p class="lede">Upload a CSV and the 3D dashboard opens immediately on the right.</p>
+      <div class="eyebrow">CSV Analytics Workspace</div>
+      <h1>CSV 3D Explorer</h1>
+      <p class="lede">Upload a CSV, prepare the dataset, and inspect charts, statistics, distributions, and correlations in one focused workspace.</p>
 
       <form id="upload-form">
         <input id="csv-file" name="csv_file" type="file" accept=".csv,text/csv" />
         <label class="dropzone" id="dropzone" for="csv-file">
-          <div class="dropzone-badge">CSV</div>
+          <div class="dropzone-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M14 2H7a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V8z"></path>
+              <path d="M14 2v6h6"></path>
+              <path d="M12 17V10"></path>
+              <path d="m9 13 3-3 3 3"></path>
+            </svg>
+          </div>
           <div class="dropzone-copy">
             <strong id="dropzone-title">Drag a CSV here</strong>
             <span id="dropzone-subtitle">Drop it in or click to browse from your machine.</span>
@@ -89,6 +96,15 @@
       <div class="viewer-stage">
         <div class="empty-state" id="empty-state">
           <div class="empty-state-inner">
+            <div class="empty-state-visual" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 19V5"></path>
+                <path d="M4 19h16"></path>
+                <path d="M8 16v-5"></path>
+                <path d="M12 16V8"></path>
+                <path d="M16 16v-3"></path>
+              </svg>
+            </div>
             <div class="empty-state-kicker">No Data Yet</div>
             <h2 class="empty-state-title">Add data to generate a dashboard.</h2>
             <p class="empty-state-copy">Drop in a CSV file and the interactive 3D view will appear here.</p>
@@ -624,6 +640,6 @@
 
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="./assets/app.js?v=20260424-36"></script>
+  <script src="./assets/app.js?v=20260427-ui"></script>
 </body>
 </html>
